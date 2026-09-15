@@ -1,0 +1,341 @@
+import { randomUUID } from 'crypto';
+import { supabase } from '../config/database';
+import { AuthClaims } from '../middleware/auth';
+import {
+  CreatePostInput,
+  CreatePostResult,
+  FeedPost,
+  FeedResult,
+  LikeResult,
+  PostComment,
+  CreateCommentResult,
+} from '../models/communityModel';
+
+const POSTS_TABLE = 'community_posts';
+const LIKES_TABLE = 'community_likes';
+const COMMENTS_TABLE = 'community_comments';
+const PROFILES_TABLE = 'profiles';
+const IMAGES_BUCKET = 'community-images';
+
+const DATA_URL_PREFIX = /^data:(image\/[\w+.-]+);base64,/;
+
+/**
+ * Best-effort profile upsert from JWT claims so a post's author row
+ * always exists (satisfies the FK) even on a fresh database.
+ */
+async function ensureProfile(claims: AuthClaims): Promise<void> {
+  const meta = claims.user_metadata ?? {};
+
+  const { error } = await supabase.from(PROFILES_TABLE).upsert(
+    {
+      id: claims.sub,
+      email: claims.email ?? null,
+      username: meta.username ?? (claims.email ? claims.email.split('@')[0] : null),
+      photo_url: meta.avatar_url ?? meta.picture ?? null,
+    },
+    { onConflict: 'id', ignoreDuplicates: true }
+  );
+
+  if (error) {
+    console.warn('ensureProfile upsert failed:', error.message);
+  }
+}
+
+function parseBase64Image(input: string): { buffer: Buffer; contentType: string; extension: string } | null {
+  if (!input || typeof input !== 'string') return null;
+
+  const match = input.match(DATA_URL_PREFIX);
+  const contentType = match?.[1] ?? 'image/jpeg';
+  const raw = match ? input.slice(match[0].length) : input;
+  const buffer = Buffer.from(raw, 'base64');
+
+  if (buffer.length === 0) return null;
+
+  const extension = contentType === 'image/png' ? 'png' : 'jpg';
+  return { buffer, contentType, extension };
+}
+
+async function uploadImages(postId: string, imagesBase64: string[]): Promise<string[]> {
+  const urls: string[] = [];
+
+  for (const image of imagesBase64) {
+    const parsed = parseBase64Image(image);
+    if (!parsed) continue;
+
+    const path = `posts/${postId}/${randomUUID()}.${parsed.extension}`;
+    const { error } = await supabase.storage
+      .from(IMAGES_BUCKET)
+      .upload(path, parsed.buffer, { contentType: parsed.contentType });
+
+    if (error) {
+      throw new Error(`Image upload failed: ${error.message}`);
+    }
+
+    const { data } = supabase.storage.from(IMAGES_BUCKET).getPublicUrl(path);
+    urls.push(data.publicUrl);
+  }
+
+  return urls;
+}
+
+export async function createPost(input: CreatePostInput, author: AuthClaims): Promise<CreatePostResult> {
+  await ensureProfile(author);
+
+  const postId = randomUUID();
+  const uploadedUrls = input.imagesBase64?.length
+    ? await uploadImages(postId, input.imagesBase64)
+    : [];
+
+  const imagesUrl = [...(input.imagesUrl ?? []).filter(Boolean), ...uploadedUrls];
+
+  const { data, error } = await supabase
+    .from(POSTS_TABLE)
+    .insert({
+      id: postId,
+      title: input.title,
+      description: input.description,
+      tag: input.tag ?? 'General',
+      images_url: imagesUrl,
+      author_id: author.sub,
+      club_id: input.clubId ?? null,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return {
+    id: data.id,
+    title: data.title,
+    description: data.description,
+    tag: data.tag,
+    imagesUrl: data.images_url ?? [],
+    clubId: data.club_id,
+    createdAt: data.created_at,
+  };
+}
+
+export async function getFeed(page: number, size: number, userId?: string): Promise<FeedResult> {
+  const from = (page - 1) * size;
+  const to = from + size - 1;
+
+  const { data: posts, error } = await supabase
+    .from(POSTS_TABLE)
+    .select('*, author:profiles(id, username, first_name, last_name, photo_url, photo_base64)')
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (error) throw error;
+  if (!posts?.length) return { data: [], page, size };
+
+  const postIds = posts.map((post) => post.id);
+
+  const [likesRes, commentsRes] = await Promise.all([
+    supabase.from(LIKES_TABLE).select('post_id, user_id').in('post_id', postIds),
+    supabase.from(COMMENTS_TABLE).select('post_id').in('post_id', postIds),
+  ]);
+
+  const likeCounts = new Map<string, number>();
+  const likedPostIds = new Set<string>();
+  for (const like of likesRes.data ?? []) {
+    likeCounts.set(like.post_id, (likeCounts.get(like.post_id) ?? 0) + 1);
+    if (userId && like.user_id === userId) likedPostIds.add(like.post_id);
+  }
+
+  const commentCounts = new Map<string, number>();
+  for (const comment of commentsRes.data ?? []) {
+    commentCounts.set(comment.post_id, (commentCounts.get(comment.post_id) ?? 0) + 1);
+  }
+
+  const feed: FeedPost[] = posts.map((post: any) => {
+    const profile = post.author;
+    const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || undefined;
+
+    return {
+      id: post.id,
+      title: post.title,
+      description: post.description,
+      tag: post.tag,
+      imagesUrl: post.images_url ?? [],
+      counts: {
+        likes: likeCounts.get(post.id) ?? 0,
+        comments: commentCounts.get(post.id) ?? 0,
+        shares: 0,
+      },
+      likedByMe: userId ? likedPostIds.has(post.id) : false,
+      author: profile
+        ? {
+            id: profile.id,
+            username: profile.username ?? undefined,
+            displayName,
+            photoUrl: profile.photo_url || profile.photo_base64 || undefined,
+          }
+        : { id: post.author_id },
+      clubId: post.club_id,
+      createdAt: post.created_at,
+    };
+  });
+
+  return { data: feed, page, size };
+}
+
+export async function likePost(postId: string, userId: string): Promise<LikeResult> {
+  const { error } = await supabase
+    .from(LIKES_TABLE)
+    .insert({ post_id: postId, user_id: userId });
+
+  // Unique violation = already liked; treat as success (idempotent)
+  if (error && error.code !== '23505') throw error;
+
+  return { liked: true, likesCount: await getLikesCount(postId) };
+}
+
+export async function unlikePost(postId: string, userId: string): Promise<LikeResult> {
+  const { error } = await supabase
+    .from(LIKES_TABLE)
+    .delete()
+    .eq('post_id', postId)
+    .eq('user_id', userId);
+
+  if (error) throw error;
+
+  return { liked: false, likesCount: await getLikesCount(postId) };
+}
+
+async function getLikesCount(postId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from(LIKES_TABLE)
+    .select('*', { count: 'exact', head: true })
+    .eq('post_id', postId);
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
+export async function addComment(
+  postId: string,
+  text: string,
+  userId: string,
+  parentCommentId?: string
+): Promise<CreateCommentResult> {
+  await ensureProfileExists(userId);
+
+  const { data, error } = await supabase
+    .from(COMMENTS_TABLE)
+    .insert({
+      post_id: postId,
+      user_id: userId,
+      text,
+      parent_id: parentCommentId ?? null,
+    })
+    .select('id, created_at')
+    .single();
+
+  if (error) throw error;
+  return { id: data.id, createdAt: data.created_at };
+}
+
+async function ensureProfileExists(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from(PROFILES_TABLE)
+    .upsert({ id: userId }, { onConflict: 'id', ignoreDuplicates: true });
+
+  if (error) {
+    console.warn('ensureProfileExists failed:', error.message);
+  }
+}
+
+export async function getComments(postId: string): Promise<PostComment[]> {
+  const { data: rows, error } = await supabase
+    .from(COMMENTS_TABLE)
+    .select('id, text, parent_id, created_at, user_id, author:profiles!community_comments_user_id_fkey(id, username, first_name, last_name, photo_url, photo_base64)')
+    .eq('post_id', postId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw error;
+
+  const nodes = new Map<string, PostComment>();
+  for (const row of rows ?? []) {
+    const profile = (row as any).author;
+    const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || undefined;
+
+    nodes.set(row.id, {
+      id: row.id,
+      text: row.text,
+      parentId: row.parent_id ?? null,
+      author: profile
+        ? {
+            id: profile.id,
+            username: profile.username ?? undefined,
+            displayName,
+            photoUrl: profile.photo_url || profile.photo_base64 || undefined,
+          }
+        : { id: (row as any).user_id },
+      createdAt: row.created_at,
+      children: [],
+      commentsCount: 0,
+    });
+  }
+
+  const roots: PostComment[] = [];
+  for (const node of nodes.values()) {
+    if (node.parentId && nodes.has(node.parentId)) {
+      nodes.get(node.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  const countTree = (node: PostComment): number => {
+    const total = node.children.reduce((sum, child) => sum + countTree(child), 0);
+    node.commentsCount = total;
+    return total + 1;
+  };
+  roots.forEach(countTree);
+
+  // Newest top-level comments first; replies oldest-first within a thread
+  return roots.reverse();
+}
+
+export async function getPostById(postId: string, userId?: string): Promise<FeedPost | null> {
+  const { data: post, error } = await supabase
+    .from(POSTS_TABLE)
+    .select('*, author:profiles(id, username, first_name, last_name, photo_url, photo_base64)')
+    .eq('id', postId)
+    .single();
+
+  if (error || !post) return null;
+
+  const [likesRes, commentsRes] = await Promise.all([
+    supabase.from(LIKES_TABLE).select('user_id').eq('post_id', postId),
+    supabase.from(COMMENTS_TABLE).select('id').eq('post_id', postId),
+  ]);
+
+  const likes = likesRes.data ?? [];
+  const profile = (post as any).author;
+  const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || undefined;
+
+  return {
+    id: post.id,
+    title: post.title,
+    description: post.description,
+    tag: post.tag,
+    imagesUrl: post.images_url ?? [],
+    counts: {
+      likes: likes.length,
+      comments: commentsRes.data?.length ?? 0,
+      shares: 0,
+    },
+    likedByMe: userId ? likes.some((like) => like.user_id === userId) : false,
+    author: profile
+      ? {
+          id: profile.id,
+          username: profile.username ?? undefined,
+          displayName,
+          photoUrl: profile.photo_url || profile.photo_base64 || undefined,
+        }
+      : { id: post.author_id },
+    clubId: post.club_id,
+    createdAt: post.created_at,
+  };
+}
