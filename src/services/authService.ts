@@ -392,7 +392,7 @@ export async function refreshToken(data: RefreshTokenRequest): Promise<AuthRespo
         id: sessionData.user.id,
         email: sessionData.user.email || '',
         username: null, firstName: null, lastName: null,
-        avatarUrl: null, photoUrl: null, photoBase64: null,
+        avatarUrl: null, photoUrl: null, photoBase64: null, avatarId: null,
         hasPassword: true,
         onboardingStatus: 'not_started' as OnboardingStatus,
         city: null, referralCode: null, gender: null, dob: null,
