@@ -84,7 +84,7 @@ export const getPollResult = async (req: Request, res: Response, next: NextFunct
 
 export const createNews = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { title, subtitle, description, imageUrl, kind, pollOptions, pollEndsAt } = req.body ?? {};
+    const { title, subtitle, description, imageUrl, tag, kind, pollOptions, pollEndsAt } = req.body ?? {};
 
     if (typeof title !== 'string' || !title.trim()) {
       res.status(400).json({ success: false, message: 'title is required' });
@@ -101,6 +101,7 @@ export const createNews = async (req: Request, res: Response, next: NextFunction
       subtitle: typeof subtitle === 'string' ? subtitle.trim() : undefined,
       description: typeof description === 'string' ? description.trim() : undefined,
       imageUrl: typeof imageUrl === 'string' ? imageUrl.trim() : undefined,
+      tag: typeof tag === 'string' ? tag.trim() : undefined,
       kind: kind === 'poll' ? 'poll' : 'article',
       pollOptions: Array.isArray(pollOptions) ? pollOptions : undefined,
       pollEndsAt: typeof pollEndsAt === 'string' ? pollEndsAt.trim() : undefined,

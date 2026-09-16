@@ -25,6 +25,7 @@ export interface NewsItem {
   likesCount: number;
   commentsCount: number;
   likedByMe: boolean;
+  tag?: string;
   poll?: NewsPoll | null;
 }
 
@@ -85,6 +86,7 @@ export interface CreateNewsInput {
   subtitle?: string;
   description?: string;
   imageUrl?: string;
+  tag?: string;
   kind?: 'article' | 'poll';
   pollOptions?: string[];
   pollEndsAt?: string;

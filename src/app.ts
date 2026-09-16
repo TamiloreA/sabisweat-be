@@ -12,6 +12,7 @@ import pointsRoutes from './routes/pointsRoutes';
 import pushRoutes from './routes/pushRoutes';
 import communityRoutes from './routes/communityRoutes';
 import newsRoutes from './routes/newsRoutes';
+import streaksRoutes from './routes/streaksRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { apiRateLimiter } from './middleware/rateLimiter';
 
@@ -45,6 +46,10 @@ app.use('/api/v1/community', communityRoutes);
 // News — also at root to match the mobile app's existing paths
 app.use('/news', newsRoutes);
 app.use('/api/v1/news', newsRoutes);
+
+// Streaks — also at root to match the mobile app's existing paths
+app.use('/streaks', streaksRoutes);
+app.use('/api/v1/streaks', streaksRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'SabiSweat API is running' });

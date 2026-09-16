@@ -118,7 +118,8 @@ function toNewsItem(row: any, counts: { likes: Map<string, number>; comments: Ma
     likesCount: counts.likes.get(row.id) ?? 0,
     commentsCount: counts.comments.get(row.id) ?? 0,
     likedByMe: counts.likedByMe.has(row.id),
-    poll,
+    tag: row.tag ?? 'general',
+    poll: poll ? { ...poll, question: row.title } : null,
   };
 }
 
@@ -257,6 +258,7 @@ export async function createNews(input: CreateNewsInput): Promise<NewsItem> {
       subtitle: input.subtitle ?? '',
       description: input.description ?? '',
       image_url: input.imageUrl ?? null,
+      tag: input.tag ?? 'general',
       kind,
     })
     .select()
@@ -312,7 +314,7 @@ export async function getPollResult(newsId: string): Promise<PollResult | null> 
   const optionIds = options.map((o) => o.id);
   const { data: votes, error: votesError } = await supabase
     .from(VOTES_TABLE)
-    .select('option_id, created_at, author:profiles!news_poll_votes_user_id_fkey(id, username, first_name, last_name, photo_url, photo_base64)')
+    .select('option_id, created_at, author:profiles(id, username, first_name, last_name, photo_url, photo_base64)')
     .in('option_id', optionIds)
     .order('created_at', { ascending: true });
 
