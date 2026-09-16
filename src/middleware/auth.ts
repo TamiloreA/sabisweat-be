@@ -4,6 +4,7 @@ export interface AuthClaims {
   sub: string;
   id: string;
   email?: string;
+  exp?: number;
   user_metadata?: Record<string, any>;
 }
 
@@ -44,6 +45,12 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction): vo
   const claims = decodeJwtPayload(token);
   if (!claims?.sub) {
     res.status(401).json({ success: false, message: 'Invalid token' });
+    return;
+  }
+
+  // Check if token is expired
+  if (claims.exp && claims.exp < Math.floor(Date.now() / 1000)) {
+    res.status(401).json({ success: false, message: 'Token expired' });
     return;
   }
 
