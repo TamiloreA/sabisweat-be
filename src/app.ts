@@ -25,6 +25,9 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' })); // Increased for base64 avatar uploads
 app.use(express.urlencoded({ extended: true }));
 
+// Trust proxy to fix express-rate-limit warnings on Render
+app.set('trust proxy', 1);
+
 // Global rate limiter
 app.use('/api/v1', apiRateLimiter);
 
