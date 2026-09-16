@@ -15,6 +15,7 @@ export interface AuthUser {
   avatarUrl: string | null;
   photoUrl: string | null;
   photoBase64: string | null;
+  avatarId: string | null;
   hasPassword: boolean;
   onboardingStatus: OnboardingStatus;
   city: string | null;
