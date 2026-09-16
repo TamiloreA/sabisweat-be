@@ -26,13 +26,15 @@ function formatNewsDate(iso: string): { date: string; time: string } {
 }
 
 function mapAuthor(profile: any, fallbackId: string) {
-  const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || undefined;
-  return profile
+  const profileData = Array.isArray(profile) ? profile[0] : profile;
+  const displayName = [profileData?.first_name, profileData?.last_name].filter(Boolean).join(' ') || undefined;
+  return profileData
     ? {
-        id: profile.id,
-        username: profile.username ?? undefined,
+        id: profileData.id,
+        username: profileData.username ?? undefined,
         displayName,
-        photoUrl: profile.photo_url || profile.photo_base64 || undefined,
+        photoUrl: profileData.photo_url || profileData.photo_base64 || undefined,
+        avatarId: profileData.avatar_id ?? undefined,
       }
     : { id: fallbackId };
 }
@@ -158,7 +160,7 @@ export async function getNewsById(id: string, userId?: string): Promise<NewsDeta
 
   const { data: commentRows, error: commentsError } = await supabase
     .from(COMMENTS_TABLE)
-    .select('id, text, created_at, user_id, author:profiles!news_comments_user_id_fkey(id, username, first_name, last_name, photo_url, photo_base64)')
+    .select('id, text, created_at, user_id, author:profiles!news_comments_user_id_fkey(id, username, first_name, last_name, photo_url, photo_base64, avatar_id)')
     .eq('news_id', id)
     .order('created_at', { ascending: false });
 
@@ -314,7 +316,7 @@ export async function getPollResult(newsId: string): Promise<PollResult | null> 
   const optionIds = options.map((o) => o.id);
   const { data: votes, error: votesError } = await supabase
     .from(VOTES_TABLE)
-    .select('option_id, created_at, author:profiles(id, username, first_name, last_name, photo_url, photo_base64)')
+    .select('option_id, created_at, author:profiles(id, username, first_name, last_name, photo_url, photo_base64, avatar_id)')
     .in('option_id', optionIds)
     .order('created_at', { ascending: true });
 

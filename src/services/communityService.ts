@@ -121,7 +121,7 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
 
   const { data: posts, error } = await supabase
     .from(POSTS_TABLE)
-    .select('*, author:profiles(id, username, first_name, last_name, photo_url, photo_base64)')
+    .select('*, author:profiles(id, username, first_name, last_name, photo_url, photo_base64, avatar_id)')
     .order('created_at', { ascending: false })
     .range(from, to);
 
@@ -148,7 +148,7 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
   }
 
   const feed: FeedPost[] = posts.map((post: any) => {
-    const profile = post.author;
+    const profile = Array.isArray(post.author) ? post.author[0] : post.author;
     const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || undefined;
 
     return {
@@ -169,6 +169,7 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
             username: profile.username ?? undefined,
             displayName,
             photoUrl: profile.photo_url || profile.photo_base64 || undefined,
+            avatarId: profile.avatar_id ?? undefined,
           }
         : { id: post.author_id },
       clubId: post.club_id,
