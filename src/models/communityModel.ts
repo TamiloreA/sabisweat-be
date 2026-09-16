@@ -3,6 +3,7 @@ export interface PostAuthor {
   username?: string;
   displayName?: string;
   photoUrl?: string;
+  avatarId?: string;
 }
 
 export interface PostCounts {
@@ -59,6 +60,7 @@ export interface CommentAuthor {
   username?: string;
   displayName?: string;
   photoUrl?: string;
+  avatarId?: string;
 }
 
 export interface PostComment {

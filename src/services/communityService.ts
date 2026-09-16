@@ -249,7 +249,7 @@ async function ensureProfileExists(userId: string): Promise<void> {
 export async function getComments(postId: string): Promise<PostComment[]> {
   const { data: rows, error } = await supabase
     .from(COMMENTS_TABLE)
-    .select('id, text, parent_id, created_at, user_id, author:profiles!community_comments_user_id_fkey(id, username, first_name, last_name, photo_url, photo_base64)')
+    .select('id, text, parent_id, created_at, user_id, author:profiles!community_comments_user_id_fkey(id, username, first_name, last_name, photo_url, photo_base64, avatar_id)')
     .eq('post_id', postId)
     .order('created_at', { ascending: true });
 
@@ -270,6 +270,7 @@ export async function getComments(postId: string): Promise<PostComment[]> {
             username: profile.username ?? undefined,
             displayName,
             photoUrl: profile.photo_url || profile.photo_base64 || undefined,
+            avatarId: profile.avatar_id ?? undefined,
           }
         : { id: (row as any).user_id },
       createdAt: row.created_at,
@@ -301,7 +302,7 @@ export async function getComments(postId: string): Promise<PostComment[]> {
 export async function getPostById(postId: string, userId?: string): Promise<FeedPost | null> {
   const { data: post, error } = await supabase
     .from(POSTS_TABLE)
-    .select('*, author:profiles(id, username, first_name, last_name, photo_url, photo_base64)')
+    .select('*, author:profiles(id, username, first_name, last_name, photo_url, photo_base64, avatar_id)')
     .eq('id', postId)
     .single();
 
@@ -334,6 +335,7 @@ export async function getPostById(postId: string, userId?: string): Promise<Feed
           username: profile.username ?? undefined,
           displayName,
           photoUrl: profile.photo_url || profile.photo_base64 || undefined,
+          avatarId: profile.avatar_id ?? undefined,
         }
       : { id: post.author_id },
     clubId: post.club_id,
