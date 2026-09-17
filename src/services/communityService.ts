@@ -19,6 +19,47 @@ const IMAGES_BUCKET = 'community-images';
 
 const DATA_URL_PREFIX = /^data:(image\/[\w+.-]+);base64,/;
 
+interface ProfileRow {
+  id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  photo_url: string | null;
+  photo_base64: string | null;
+  avatar_id: string | null;
+}
+
+/**
+ * Fetches profiles by id in a dedicated query and returns them as a map.
+ * We deliberately avoid PostgREST embedded joins (author:profiles(...)):
+ * they depend on the schema cache, which has proven unreliable and caused
+ * authors to randomly come back null. Two plain queries are deterministic.
+ */
+async function fetchProfilesMap(ids: string[]): Promise<Map<string, ProfileRow>> {
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (!uniqueIds.length) return new Map();
+
+  const { data, error } = await supabase
+    .from(PROFILES_TABLE)
+    .select('id, username, first_name, last_name, photo_url, photo_base64, avatar_id')
+    .in('id', uniqueIds);
+
+  if (error) throw error;
+  return new Map((data ?? []).map((p) => [p.id, p as ProfileRow]));
+}
+
+function mapAuthor(profile: ProfileRow | undefined, fallbackId: string) {
+  if (!profile) return { id: fallbackId };
+  const displayName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || undefined;
+  return {
+    id: profile.id,
+    username: profile.username ?? undefined,
+    displayName,
+    photoUrl: profile.photo_url || profile.photo_base64 || undefined,
+    avatarId: profile.avatar_id ?? undefined,
+  };
+}
+
 /**
  * Best-effort profile upsert from JWT claims so a post's author row
  * always exists (satisfies the FK) even on a fresh database.
@@ -121,7 +162,7 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
 
   const { data: posts, error } = await supabase
     .from(POSTS_TABLE)
-    .select('*, author:profiles(id, username, first_name, last_name, photo_url, photo_base64, avatar_id)')
+    .select('*')
     .order('created_at', { ascending: false })
     .range(from, to);
 
@@ -130,7 +171,8 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
 
   const postIds = posts.map((post) => post.id);
 
-  const [likesRes, commentsRes] = await Promise.all([
+  const [profileMap, likesRes, commentsRes] = await Promise.all([
+    fetchProfilesMap(posts.map((post) => post.author_id)),
     supabase.from(LIKES_TABLE).select('post_id, user_id').in('post_id', postIds),
     supabase.from(COMMENTS_TABLE).select('post_id').in('post_id', postIds),
   ]);
@@ -147,35 +189,22 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
     commentCounts.set(comment.post_id, (commentCounts.get(comment.post_id) ?? 0) + 1);
   }
 
-  const feed: FeedPost[] = posts.map((post: any) => {
-    const profile = Array.isArray(post.author) ? post.author[0] : post.author;
-    const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || undefined;
-
-    return {
-      id: post.id,
-      title: post.title,
-      description: post.description,
-      tag: post.tag,
-      imagesUrl: post.images_url ?? [],
-      counts: {
-        likes: likeCounts.get(post.id) ?? 0,
-        comments: commentCounts.get(post.id) ?? 0,
-        shares: 0,
-      },
-      likedByMe: userId ? likedPostIds.has(post.id) : false,
-      author: profile
-        ? {
-            id: profile.id,
-            username: profile.username ?? undefined,
-            displayName,
-            photoUrl: profile.photo_url || profile.photo_base64 || undefined,
-            avatarId: profile.avatar_id ?? undefined,
-          }
-        : { id: post.author_id },
-      clubId: post.club_id,
-      createdAt: post.created_at,
-    };
-  });
+  const feed: FeedPost[] = posts.map((post: any) => ({
+    id: post.id,
+    title: post.title,
+    description: post.description,
+    tag: post.tag,
+    imagesUrl: post.images_url ?? [],
+    counts: {
+      likes: likeCounts.get(post.id) ?? 0,
+      comments: commentCounts.get(post.id) ?? 0,
+      shares: 0,
+    },
+    likedByMe: userId ? likedPostIds.has(post.id) : false,
+    author: mapAuthor(profileMap.get(post.author_id), post.author_id),
+    clubId: post.club_id,
+    createdAt: post.created_at,
+  }));
 
   return { data: feed, page, size };
 }
@@ -249,30 +278,21 @@ async function ensureProfileExists(userId: string): Promise<void> {
 export async function getComments(postId: string): Promise<PostComment[]> {
   const { data: rows, error } = await supabase
     .from(COMMENTS_TABLE)
-    .select('id, text, parent_id, created_at, user_id, author:profiles!community_comments_user_id_fkey(id, username, first_name, last_name, photo_url, photo_base64, avatar_id)')
+    .select('id, text, parent_id, created_at, user_id')
     .eq('post_id', postId)
     .order('created_at', { ascending: true });
 
   if (error) throw error;
 
+  const profileMap = await fetchProfilesMap((rows ?? []).map((row) => row.user_id));
+
   const nodes = new Map<string, PostComment>();
   for (const row of rows ?? []) {
-    const profile = (row as any).author;
-    const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || undefined;
-
     nodes.set(row.id, {
       id: row.id,
       text: row.text,
       parentId: row.parent_id ?? null,
-      author: profile
-        ? {
-            id: profile.id,
-            username: profile.username ?? undefined,
-            displayName,
-            photoUrl: profile.photo_url || profile.photo_base64 || undefined,
-            avatarId: profile.avatar_id ?? undefined,
-          }
-        : { id: (row as any).user_id },
+      author: mapAuthor(profileMap.get(row.user_id), row.user_id),
       createdAt: row.created_at,
       children: [],
       commentsCount: 0,
@@ -302,20 +322,19 @@ export async function getComments(postId: string): Promise<PostComment[]> {
 export async function getPostById(postId: string, userId?: string): Promise<FeedPost | null> {
   const { data: post, error } = await supabase
     .from(POSTS_TABLE)
-    .select('*, author:profiles(id, username, first_name, last_name, photo_url, photo_base64, avatar_id)')
+    .select('*')
     .eq('id', postId)
     .single();
 
   if (error || !post) return null;
 
-  const [likesRes, commentsRes] = await Promise.all([
+  const [profileMap, likesRes, commentsRes] = await Promise.all([
+    fetchProfilesMap([post.author_id]),
     supabase.from(LIKES_TABLE).select('user_id').eq('post_id', postId),
     supabase.from(COMMENTS_TABLE).select('id').eq('post_id', postId),
   ]);
 
   const likes = likesRes.data ?? [];
-  const profile = (post as any).author;
-  const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || undefined;
 
   return {
     id: post.id,
@@ -329,15 +348,7 @@ export async function getPostById(postId: string, userId?: string): Promise<Feed
       shares: 0,
     },
     likedByMe: userId ? likes.some((like) => like.user_id === userId) : false,
-    author: profile
-      ? {
-          id: profile.id,
-          username: profile.username ?? undefined,
-          displayName,
-          photoUrl: profile.photo_url || profile.photo_base64 || undefined,
-          avatarId: profile.avatar_id ?? undefined,
-        }
-      : { id: post.author_id },
+    author: mapAuthor(profileMap.get(post.author_id), post.author_id),
     clubId: post.club_id,
     createdAt: post.created_at,
   };

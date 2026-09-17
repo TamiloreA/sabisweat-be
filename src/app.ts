@@ -58,20 +58,6 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'SabiSweat API is running' });
 });
 
-// TEMP DEBUG: reports which Supabase env the running process actually loaded.
-// Remove after the Render env issue is resolved.
-app.get('/debug/env', (req, res) => {
-  const url = process.env.SUPABASE_URL || '';
-  const key = process.env.SUPABASE_SECRET_KEY || '';
-  res.status(200).json({
-    supabaseUrl: url,
-    secretKeyPrefix: key ? key.slice(0, 16) : null,
-    secretKeyLength: key.length,
-    hasPublishable: !!process.env.SUPABASE_PUBLISHABLE_KEY,
-    nodeEnv: process.env.NODE_ENV || null,
-  });
-});
-
 app.use(errorHandler);
 
 export default app;
