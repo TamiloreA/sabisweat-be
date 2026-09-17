@@ -346,6 +346,7 @@ export async function getPollResult(newsId: string): Promise<PollResult | null> 
         username: v.author?.username ?? undefined,
         displayName: [v.author?.first_name, v.author?.last_name].filter(Boolean).join(' ') || undefined,
         photoUrl: v.author?.photo_url || v.author?.photo_base64 || undefined,
+        avatarId: v.author?.avatar_id ?? undefined,
         votedAt: v.created_at,
       })),
     })),

@@ -64,6 +64,7 @@ export interface PollVoter {
   username?: string;
   displayName?: string;
   photoUrl?: string;
+  avatarId?: string;
   votedAt: string;
 }
 
