@@ -10,8 +10,27 @@ if (!supabaseUrl || !supabaseSecretKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
-// Global client (acts as anon or restricted depending on the key)
-export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseSecretKey);
+// Global data client (service role). Configured to never hold a user
+// session so RLS is always bypassed for data queries.
+export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseSecretKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
+});
+
+// Dedicated client for auth operations (signInWithPassword, refreshSession,
+// verifyOtp). These set a session on the client instance — if they ran on the
+// shared data client, every later data query would inherit that user's token
+// and become RLS-scoped (the "anonymous authors" bug). Keep them isolated.
+export const authClient: SupabaseClient = createClient(supabaseUrl, supabaseSecretKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
+});
 
 // User-scoped client for operations that need to satisfy RLS using the user's token
 export const getUserSupabase = (token: string): SupabaseClient => {

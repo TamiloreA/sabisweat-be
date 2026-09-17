@@ -4,7 +4,7 @@
  * Prioritizes speed with minimal DB round-trips and security with proper validation.
  */
 
-import { supabase } from '../config/database';
+import { supabase, authClient } from '../config/database';
 import type {
   AuthUser,
   RegisterRequest,
@@ -119,7 +119,7 @@ export async function register(data: RegisterRequest): Promise<{
 
   
   // Log them in to get a token so we can insert into profiles
-  const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+  const { data: signInData, error: signInError } = await authClient.auth.signInWithPassword({
     email: normalizedEmail,
     password,
   });
@@ -179,7 +179,7 @@ export async function login(data: LoginRequest): Promise<AuthResponse> {
     throw { status: 400, error: 'validation_error', message: 'Email and password are required' };
   }
 
-  const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+  const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
     email: email.toLowerCase().trim(),
     password,
   });
@@ -311,7 +311,7 @@ export async function verifyResetCode(data: VerifyCodeRequest): Promise<VerifyCo
     throw { status: 400, error: 'validation_error', message: 'Email and code are required' };
   }
 
-  const { data: verifyData, error } = await supabase.auth.verifyOtp({
+  const { data: verifyData, error } = await authClient.auth.verifyOtp({
     email: data.email.toLowerCase().trim(),
     token: data.code,
     type: 'recovery',
@@ -372,7 +372,7 @@ export async function refreshToken(data: RefreshTokenRequest): Promise<AuthRespo
     throw { status: 400, error: 'validation_error', message: 'Refresh token is required' };
   }
 
-  const { data: sessionData, error } = await supabase.auth.refreshSession({
+  const { data: sessionData, error } = await authClient.auth.refreshSession({
     refresh_token: data.refreshToken,
   });
 
@@ -456,7 +456,7 @@ export async function changePassword(
   }
 
   // Verify old password
-  const { error: verifyError } = await supabase.auth.signInWithPassword({
+  const { error: verifyError } = await authClient.auth.signInWithPassword({
     email: profile.email,
     password: data.oldPassword,
   });
