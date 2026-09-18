@@ -144,3 +144,16 @@ export const getClubs = async (req: Request, res: Response, next: NextFunction) 
     next(error);
   }
 };
+
+export const getClubById = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const club = await communityService.getClubById(req.params.id, req.user?.sub);
+    if (!club) {
+      res.status(404).json({ success: false, message: 'Club not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: club });
+  } catch (error) {
+    next(error);
+  }
+};

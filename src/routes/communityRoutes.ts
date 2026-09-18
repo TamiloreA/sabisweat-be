@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getFeed, createPost, likePost, unlikePost, addComment, getComments, getPostById, createClub, getClubs } from '../controllers/communityController';
+import { getFeed, createPost, likePost, unlikePost, addComment, getComments, getPostById, createClub, getClubs, getClubById } from '../controllers/communityController';
 import { requireAuth } from '../middleware/auth';
 
 const router = Router();
@@ -252,5 +252,6 @@ router.get('/posts/:id', requireAuth, getPostById);
  */
 router.post('/clubs', requireAuth, createClub);
 router.get('/clubs', requireAuth, getClubs);
+router.get('/clubs/:id', requireAuth, getClubById);
 
 export default router;
