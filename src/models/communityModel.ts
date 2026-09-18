@@ -15,7 +15,8 @@ export interface PostCounts {
 export interface PollOption {
   id: string;
   text: string;
-  votes: number;
+  votesCount: number;
+  percent: number;
   votedByMe: boolean;
 }
 

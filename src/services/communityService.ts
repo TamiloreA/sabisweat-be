@@ -306,12 +306,18 @@ export async function getClubPosts(clubId: string, page: number, size: number, u
   }
 
   const feed: FeedPost[] = posts.map((post: any) => {
-    const options = (pollOptionsRes.data ?? []).filter((o) => o.post_id === post.id).map(o => ({
-      id: o.id,
-      text: o.text,
-      votes: voteCounts.get(o.id) ?? 0,
-      votedByMe: myVotedOptionIds.has(o.id),
-    }));
+    const postOptions = (pollOptionsRes.data ?? []).filter((o) => o.post_id === post.id);
+    const totalVotes = postOptions.reduce((acc, o) => acc + (voteCounts.get(o.id) ?? 0), 0);
+    const options = postOptions.map((o) => {
+      const votesCount = voteCounts.get(o.id) ?? 0;
+      return {
+        id: o.id,
+        text: o.text,
+        votesCount,
+        percent: totalVotes > 0 ? Math.round((votesCount / totalVotes) * 100) : 0,
+        votedByMe: myVotedOptionIds.has(o.id),
+      };
+    });
 
     return {
       id: post.id,
@@ -379,7 +385,7 @@ export async function getCommunityPollResult(postId: string): Promise<CommunityP
     .from(POLL_OPTIONS_TABLE)
     .select('id, text')
     .eq('post_id', postId)
-    .order('sort_order', { ascending: true });
+    .order('created_at', { ascending: true });
 
   if (optionsError) throw optionsError;
   if (!options?.length) return null;
