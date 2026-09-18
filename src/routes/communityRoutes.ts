@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getFeed, createPost, likePost, unlikePost, addComment, getComments, getPostById, createClub, getClubs, getClubById } from '../controllers/communityController';
+import { getFeed, createPost, likePost, unlikePost, addComment, getComments, getPostById, createClub, getClubs, getClubById, getClubPosts, voteOnPoll, createClubEvent, getClubEvents, rsvpClubEvent } from '../controllers/communityController';
 import { requireAuth } from '../middleware/auth';
 
 const router = Router();
@@ -253,5 +253,10 @@ router.get('/posts/:id', requireAuth, getPostById);
 router.post('/clubs', requireAuth, createClub);
 router.get('/clubs', requireAuth, getClubs);
 router.get('/clubs/:id', requireAuth, getClubById);
+router.get('/clubs/:id/posts', requireAuth, getClubPosts);
+router.post('/clubs/:id/events', requireAuth, createClubEvent);
+router.get('/clubs/:id/events', requireAuth, getClubEvents);
+router.post('/events/:eventId/rsvp', requireAuth, rsvpClubEvent);
+router.post('/polls/vote', requireAuth, voteOnPoll);
 
 export default router;

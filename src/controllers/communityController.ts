@@ -35,6 +35,7 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
         imagesUrl: Array.isArray(imagesUrl) ? imagesUrl : undefined,
         imagesBase64: Array.isArray(imagesBase64) ? imagesBase64 : undefined,
         clubId: typeof clubId === 'string' && clubId.trim() ? clubId.trim() : undefined,
+        pollOptions: Array.isArray(req.body.pollOptions) ? req.body.pollOptions : undefined,
       },
       req.user!
     );
@@ -153,6 +154,88 @@ export const getClubById = async (req: Request, res: Response, next: NextFunctio
       return;
     }
     res.status(200).json({ success: true, data: club });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getClubPosts = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const size = Math.min(50, Math.max(1, Number(req.query.size) || 10));
+
+    const feed = await communityService.getClubPosts(req.params.id, page, size, req.user?.sub);
+    res.status(200).json({ success: true, data: feed });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const voteOnPoll = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { optionId } = req.body ?? {};
+    if (typeof optionId !== 'string' || !optionId.trim()) {
+      res.status(400).json({ success: false, message: 'optionId is required' });
+      return;
+    }
+
+    await communityService.voteOnPoll(optionId.trim(), req.user!.id);
+    res.status(200).json({ success: true, message: 'Voted successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createClubEvent = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { title, description, locationText, startAt, coverImageUrl } = req.body ?? {};
+
+    if (typeof title !== 'string' || !title.trim()) {
+      res.status(400).json({ success: false, message: 'title is required' });
+      return;
+    }
+    if (typeof startAt !== 'string' || !startAt.trim()) {
+      res.status(400).json({ success: false, message: 'startAt is required' });
+      return;
+    }
+
+    const event = await communityService.createClubEvent(
+      req.params.id,
+      {
+        title: title.trim(),
+        description: typeof description === 'string' ? description.trim() : undefined,
+        locationText: typeof locationText === 'string' ? locationText.trim() : undefined,
+        startAt: startAt.trim(),
+        coverImageUrl: typeof coverImageUrl === 'string' ? coverImageUrl.trim() : undefined,
+      },
+      req.user!
+    );
+
+    res.status(201).json({ success: true, data: event });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getClubEvents = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const events = await communityService.getClubEvents(req.params.id, req.user?.sub);
+    res.status(200).json({ success: true, data: events });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const rsvpClubEvent = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rsvp } = req.body ?? {};
+    if (typeof rsvp !== 'boolean') {
+      res.status(400).json({ success: false, message: 'rsvp boolean is required' });
+      return;
+    }
+
+    await communityService.rsvpClubEvent(req.params.eventId, req.user!.id, rsvp);
+    res.status(200).json({ success: true, message: rsvp ? 'RSVP successful' : 'RSVP cancelled' });
   } catch (error) {
     next(error);
   }

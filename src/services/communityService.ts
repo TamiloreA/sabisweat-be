@@ -11,6 +11,8 @@ import {
   CreateCommentResult,
   ClubDetail,
   CreateClubInput,
+  CreateEventInput,
+  ClubEvent,
 } from '../models/communityModel';
 
 const POSTS_TABLE = 'community_posts';
@@ -19,6 +21,10 @@ const COMMENTS_TABLE = 'community_comments';
 const PROFILES_TABLE = 'profiles';
 const CLUBS_TABLE = 'clubs';
 const CLUB_MEMBERS_TABLE = 'club_members';
+const POLL_OPTIONS_TABLE = 'community_poll_options';
+const POLL_VOTES_TABLE = 'community_poll_votes';
+const CLUB_EVENTS_TABLE = 'club_events';
+const CLUB_EVENT_RSVPS_TABLE = 'club_event_rsvps';
 const IMAGES_BUCKET = 'community-images';
 
 const DATA_URL_PREFIX = /^data:(image\/[\w+.-]+);base64,/;
@@ -126,6 +132,18 @@ async function uploadImages(postId: string, imagesBase64: string[]): Promise<str
 export async function createPost(input: CreatePostInput, author: AuthClaims): Promise<CreatePostResult> {
   await ensureProfile(author);
 
+  if (input.clubId) {
+    const { data: membership } = await supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .select('role')
+      .eq('club_id', input.clubId)
+      .eq('user_id', author.sub)
+      .single();
+    if (!membership) {
+      throw new Error('You must be a member of this club to post.');
+    }
+  }
+
   const postId = randomUUID();
   const uploadedUrls = input.imagesBase64?.length
     ? await uploadImages(postId, input.imagesBase64)
@@ -149,6 +167,15 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
 
   if (error) throw error;
 
+  if (input.pollOptions && input.pollOptions.length > 0) {
+    const optionsToInsert = input.pollOptions.map((text) => ({
+      post_id: postId,
+      text,
+    }));
+    const { error: pollError } = await supabase.from(POLL_OPTIONS_TABLE).insert(optionsToInsert);
+    if (pollError) throw pollError;
+  }
+
   return {
     id: data.id,
     title: data.title,
@@ -167,6 +194,7 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
   const { data: posts, error } = await supabase
     .from(POSTS_TABLE)
     .select('*')
+    .is('club_id', null)
     .order('created_at', { ascending: false })
     .range(from, to);
 
@@ -213,6 +241,98 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
   return { data: feed, page, size };
 }
 
+export async function getClubPosts(clubId: string, page: number, size: number, userId?: string): Promise<FeedResult> {
+  if (userId) {
+    const { data: membership } = await supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .select('role')
+      .eq('club_id', clubId)
+      .eq('user_id', userId)
+      .single();
+    if (!membership) {
+      throw new Error('Access Denied: You must be a member of this club to view its posts.');
+    }
+  }
+
+  const from = (page - 1) * size;
+  const to = from + size - 1;
+
+  const { data: posts, error } = await supabase
+    .from(POSTS_TABLE)
+    .select('*')
+    .eq('club_id', clubId)
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (error) throw error;
+  if (!posts?.length) return { data: [], page, size };
+
+  const postIds = posts.map((post) => post.id);
+
+  const [profileMap, likesRes, commentsRes, pollOptionsRes, pollVotesRes] = await Promise.all([
+    fetchProfilesMap(posts.map((post) => post.author_id)),
+    supabase.from(LIKES_TABLE).select('post_id, user_id').in('post_id', postIds),
+    supabase.from(COMMENTS_TABLE).select('post_id').in('post_id', postIds),
+    supabase.from(POLL_OPTIONS_TABLE).select('*').in('post_id', postIds),
+    userId ? supabase.from(POLL_VOTES_TABLE).select('option_id').eq('user_id', userId) : Promise.resolve({ data: [] }),
+  ]);
+
+  const likeCounts = new Map<string, number>();
+  const likedPostIds = new Set<string>();
+  for (const like of likesRes.data ?? []) {
+    likeCounts.set(like.post_id, (likeCounts.get(like.post_id) ?? 0) + 1);
+    if (userId && like.user_id === userId) likedPostIds.add(like.post_id);
+  }
+
+  const commentCounts = new Map<string, number>();
+  for (const comment of commentsRes.data ?? []) {
+    commentCounts.set(comment.post_id, (commentCounts.get(comment.post_id) ?? 0) + 1);
+  }
+
+  const myVotedOptionIds = new Set((pollVotesRes.data ?? []).map((v) => v.option_id));
+
+  // Get vote counts for all options in these posts
+  const optionIds = (pollOptionsRes.data ?? []).map((o) => o.id);
+  let allVotesData: any[] = [];
+  if (optionIds.length > 0) {
+    const { data } = await supabase.from(POLL_VOTES_TABLE).select('option_id').in('option_id', optionIds);
+    allVotesData = data ?? [];
+  }
+  const voteCounts = new Map<string, number>();
+  for (const v of allVotesData) {
+    voteCounts.set(v.option_id, (voteCounts.get(v.option_id) ?? 0) + 1);
+  }
+
+  const feed: FeedPost[] = posts.map((post: any) => {
+    const options = (pollOptionsRes.data ?? []).filter((o) => o.post_id === post.id).map(o => ({
+      id: o.id,
+      text: o.text,
+      votes: voteCounts.get(o.id) ?? 0,
+      votedByMe: myVotedOptionIds.has(o.id),
+    }));
+
+    return {
+      id: post.id,
+      title: post.title,
+      description: post.description,
+      tag: post.tag,
+      imagesUrl: post.images_url ?? [],
+      counts: {
+        likes: likeCounts.get(post.id) ?? 0,
+        comments: commentCounts.get(post.id) ?? 0,
+        shares: 0,
+      },
+      likedByMe: userId ? likedPostIds.has(post.id) : false,
+      author: mapAuthor(profileMap.get(post.author_id), post.author_id),
+      clubId: post.club_id,
+      pollOptions: options.length > 0 ? options : undefined,
+      createdAt: post.created_at,
+    };
+  });
+
+  return { data: feed, page, size };
+}
+
 export async function likePost(postId: string, userId: string): Promise<LikeResult> {
   const { error } = await supabase
     .from(LIKES_TABLE)
@@ -234,6 +354,14 @@ export async function unlikePost(postId: string, userId: string): Promise<LikeRe
   if (error) throw error;
 
   return { liked: false, likesCount: await getLikesCount(postId) };
+}
+
+export async function voteOnPoll(optionId: string, userId: string): Promise<void> {
+  const { error } = await supabase
+    .from(POLL_VOTES_TABLE)
+    .insert({ option_id: optionId, user_id: userId });
+
+  if (error && error.code !== '23505') throw error;
 }
 
 async function getLikesCount(postId: string): Promise<number> {
@@ -489,4 +617,106 @@ export async function getClubById(clubId: string, userId?: string): Promise<Club
     joined: userId ? members.some((m) => m.user_id === userId) : false,
     createdAt: club.created_at,
   };
+}
+
+export async function createClubEvent(clubId: string, input: CreateEventInput, author: AuthClaims): Promise<ClubEvent> {
+  await ensureProfileExists(author.sub);
+
+  const { data: membership } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('user_id', author.sub)
+    .single();
+
+  if (!membership || membership.role !== 'admin') {
+    throw new Error('Only club admins can create events.');
+  }
+
+  const { data, error } = await supabase
+    .from(CLUB_EVENTS_TABLE)
+    .insert({
+      club_id: clubId,
+      title: input.title,
+      description: input.description ?? '',
+      location_text: input.locationText ?? '',
+      start_at: input.startAt,
+      cover_image_url: input.coverImageUrl ?? null,
+      created_by: author.sub,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return {
+    id: data.id,
+    clubId: data.club_id,
+    title: data.title,
+    description: data.description,
+    locationText: data.location_text,
+    startAt: data.start_at,
+    coverImageUrl: data.cover_image_url ?? '',
+    createdBy: data.created_by,
+    rsvpsCount: 0,
+    rsvpedByMe: false,
+    createdAt: data.created_at,
+  };
+}
+
+export async function getClubEvents(clubId: string, userId?: string): Promise<ClubEvent[]> {
+  const { data: events, error } = await supabase
+    .from(CLUB_EVENTS_TABLE)
+    .select('*')
+    .eq('club_id', clubId)
+    .order('start_at', { ascending: true });
+
+  if (error) throw error;
+  if (!events?.length) return [];
+
+  const eventIds = events.map(e => e.id);
+  const { data: rsvpsRes } = await supabase
+    .from(CLUB_EVENT_RSVPS_TABLE)
+    .select('event_id, user_id')
+    .in('event_id', eventIds);
+
+  const rsvpCounts = new Map<string, number>();
+  const myRsvps = new Set<string>();
+
+  for (const rsvp of rsvpsRes ?? []) {
+    rsvpCounts.set(rsvp.event_id, (rsvpCounts.get(rsvp.event_id) ?? 0) + 1);
+    if (userId && rsvp.user_id === userId) {
+      myRsvps.add(rsvp.event_id);
+    }
+  }
+
+  return events.map((e: any) => ({
+    id: e.id,
+    clubId: e.club_id,
+    title: e.title,
+    description: e.description,
+    locationText: e.location_text,
+    startAt: e.start_at,
+    coverImageUrl: e.cover_image_url ?? '',
+    createdBy: e.created_by,
+    rsvpsCount: rsvpCounts.get(e.id) ?? 0,
+    rsvpedByMe: userId ? myRsvps.has(e.id) : false,
+    createdAt: e.created_at,
+  }));
+}
+
+export async function rsvpClubEvent(eventId: string, userId: string, rsvp: boolean): Promise<void> {
+  if (rsvp) {
+    const { error } = await supabase
+      .from(CLUB_EVENT_RSVPS_TABLE)
+      .insert({ event_id: eventId, user_id: userId });
+    if (error && error.code !== '23505') throw error;
+  } else {
+    const { error } = await supabase
+      .from(CLUB_EVENT_RSVPS_TABLE)
+      .delete()
+      .eq('event_id', eventId)
+      .eq('user_id', userId);
+    if (error) throw error;
+  }
 }

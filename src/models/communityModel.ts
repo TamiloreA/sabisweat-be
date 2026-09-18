@@ -12,6 +12,13 @@ export interface PostCounts {
   shares: number;
 }
 
+export interface PollOption {
+  id: string;
+  text: string;
+  votes: number;
+  votedByMe: boolean;
+}
+
 export interface FeedPost {
   id: string;
   title: string;
@@ -22,6 +29,7 @@ export interface FeedPost {
   likedByMe: boolean;
   author: PostAuthor;
   clubId: string | null;
+  pollOptions?: PollOption[];
   createdAt: string;
 }
 
@@ -38,6 +46,7 @@ export interface CreatePostInput {
   imagesUrl?: string[];
   imagesBase64?: string[];
   clubId?: string;
+  pollOptions?: string[];
 }
 
 export interface CreatePostResult {
@@ -101,4 +110,26 @@ export interface CreateClubInput {
   coverImageUrl?: string;
   profileImageUrl?: string;
   theme?: string;
+}
+
+export interface CreateEventInput {
+  title: string;
+  description?: string;
+  locationText?: string;
+  startAt: string;
+  coverImageUrl?: string;
+}
+
+export interface ClubEvent {
+  id: string;
+  clubId: string;
+  title: string;
+  description: string;
+  locationText: string;
+  startAt: string;
+  coverImageUrl: string;
+  createdBy: string;
+  rsvpsCount: number;
+  rsvpedByMe: boolean;
+  createdAt: string;
 }
