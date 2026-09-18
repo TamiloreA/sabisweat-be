@@ -458,3 +458,35 @@ export async function getClubs(userId?: string): Promise<ClubDetail[]> {
     createdAt: club.created_at,
   }));
 }
+
+export async function getClubById(clubId: string, userId?: string): Promise<ClubDetail | null> {
+  const { data: club, error } = await supabase
+    .from(CLUBS_TABLE)
+    .select('*')
+    .eq('id', clubId)
+    .single();
+
+  if (error || !club) return null;
+
+  const { data: membersRes } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('user_id')
+    .eq('club_id', clubId);
+
+  const members = membersRes ?? [];
+
+  return {
+    id: club.id,
+    name: club.name,
+    description: club.description,
+    tag: club.tag,
+    locationText: club.location_text,
+    coverImageUrl: club.cover_image_url,
+    profileImageUrl: club.profile_image_url,
+    theme: club.theme,
+    status: club.status,
+    membersCount: members.length,
+    joined: userId ? members.some((m) => m.user_id === userId) : false,
+    createdAt: club.created_at,
+  };
+}
