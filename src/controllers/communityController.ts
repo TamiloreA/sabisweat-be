@@ -107,3 +107,40 @@ export const getPostById = async (req: Request, res: Response, next: NextFunctio
     next(error);
   }
 };
+
+export const createClub = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { name, description, tag, locationText, coverImageUrl, profileImageUrl, theme } = req.body ?? {};
+
+    if (typeof name !== 'string' || !name.trim()) {
+      res.status(400).json({ success: false, message: 'name is required' });
+      return;
+    }
+
+    const club = await communityService.createClub(
+      {
+        name: name.trim(),
+        description: typeof description === 'string' ? description.trim() : '',
+        tag: typeof tag === 'string' ? tag.trim() : undefined,
+        locationText: typeof locationText === 'string' ? locationText.trim() : undefined,
+        coverImageUrl: typeof coverImageUrl === 'string' ? coverImageUrl.trim() : undefined,
+        profileImageUrl: typeof profileImageUrl === 'string' ? profileImageUrl.trim() : undefined,
+        theme: typeof theme === 'string' ? theme.trim() : undefined,
+      },
+      req.user!
+    );
+
+    res.status(201).json({ success: true, data: club });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getClubs = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const clubs = await communityService.getClubs(req.user?.sub);
+    res.status(200).json({ success: true, data: clubs });
+  } catch (error) {
+    next(error);
+  }
+};

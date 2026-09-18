@@ -9,12 +9,16 @@ import {
   LikeResult,
   PostComment,
   CreateCommentResult,
+  ClubDetail,
+  CreateClubInput,
 } from '../models/communityModel';
 
 const POSTS_TABLE = 'community_posts';
 const LIKES_TABLE = 'community_likes';
 const COMMENTS_TABLE = 'community_comments';
 const PROFILES_TABLE = 'profiles';
+const CLUBS_TABLE = 'clubs';
+const CLUB_MEMBERS_TABLE = 'club_members';
 const IMAGES_BUCKET = 'community-images';
 
 const DATA_URL_PREFIX = /^data:(image\/[\w+.-]+);base64,/;
@@ -352,4 +356,102 @@ export async function getPostById(postId: string, userId?: string): Promise<Feed
     clubId: post.club_id,
     createdAt: post.created_at,
   };
+}
+
+export async function createClub(input: CreateClubInput, author: AuthClaims): Promise<ClubDetail> {
+  await ensureProfileExists(author.sub);
+
+  const clubId = randomUUID();
+
+  // Create club
+  const { data: clubData, error: clubError } = await supabase
+    .from(CLUBS_TABLE)
+    .insert({
+      id: clubId,
+      name: input.name,
+      description: input.description ?? '',
+      tag: input.tag ?? 'General',
+      location_text: input.locationText ?? '',
+      cover_image_url: input.coverImageUrl ?? '',
+      profile_image_url: input.profileImageUrl ?? '',
+      theme: input.theme ?? 'green',
+      status: 'pending',
+      created_by: author.sub,
+    })
+    .select()
+    .single();
+
+  if (clubError) throw clubError;
+
+  // Add creator as admin
+  const { error: memberError } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .insert({
+      club_id: clubId,
+      user_id: author.sub,
+      role: 'admin',
+    });
+
+  if (memberError) throw memberError;
+
+  return {
+    id: clubData.id,
+    name: clubData.name,
+    description: clubData.description,
+    tag: clubData.tag,
+    locationText: clubData.location_text,
+    coverImageUrl: clubData.cover_image_url,
+    profileImageUrl: clubData.profile_image_url,
+    theme: clubData.theme,
+    status: clubData.status,
+    membersCount: 1,
+    joined: true,
+    createdAt: clubData.created_at,
+  };
+}
+
+export async function getClubs(userId?: string): Promise<ClubDetail[]> {
+  const { data: clubs, error } = await supabase
+    .from(CLUBS_TABLE)
+    .select('*')
+    .eq('status', 'approved')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  if (!clubs?.length) return [];
+
+  const clubIds = clubs.map((c: any) => c.id);
+
+  // Fetch all members to compute counts and joined status
+  const { data: membersRes, error: membersError } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('club_id, user_id')
+    .in('club_id', clubIds);
+
+  if (membersError) throw membersError;
+
+  const memberCounts = new Map<string, number>();
+  const myJoinedClubs = new Set<string>();
+
+  for (const member of membersRes ?? []) {
+    memberCounts.set(member.club_id, (memberCounts.get(member.club_id) ?? 0) + 1);
+    if (userId && member.user_id === userId) {
+      myJoinedClubs.add(member.club_id);
+    }
+  }
+
+  return clubs.map((club: any) => ({
+    id: club.id,
+    name: club.name,
+    description: club.description,
+    tag: club.tag,
+    locationText: club.location_text,
+    coverImageUrl: club.cover_image_url,
+    profileImageUrl: club.profile_image_url,
+    theme: club.theme,
+    status: club.status,
+    membersCount: memberCounts.get(club.id) ?? 0,
+    joined: userId ? myJoinedClubs.has(club.id) : false,
+    createdAt: club.created_at,
+  }));
 }

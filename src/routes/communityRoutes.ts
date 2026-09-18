@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getFeed, createPost, likePost, unlikePost, addComment, getComments, getPostById } from '../controllers/communityController';
+import { getFeed, createPost, likePost, unlikePost, addComment, getComments, getPostById, createClub, getClubs } from '../controllers/communityController';
 import { requireAuth } from '../middleware/auth';
 
 const router = Router();
@@ -218,5 +218,39 @@ router.get('/posts/:id/comments', requireAuth, getComments);
  *         description: Post not found
  */
 router.get('/posts/:id', requireAuth, getPostById);
+
+
+/**
+ * @openapi
+ * /community/clubs:
+ *   post:
+ *     summary: Create a club (pending approval)
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name]
+ *             properties:
+ *               name:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Club created
+ *   get:
+ *     summary: Get all approved clubs
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of clubs
+ */
+router.post('/clubs', requireAuth, createClub);
+router.get('/clubs', requireAuth, getClubs);
 
 export default router;

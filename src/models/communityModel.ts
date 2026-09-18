@@ -77,3 +77,28 @@ export interface CreateCommentResult {
   id: string;
   createdAt: string;
 }
+
+export interface ClubDetail {
+  id: string;
+  name: string;
+  description: string;
+  tag: string;
+  locationText: string;
+  coverImageUrl: string;
+  profileImageUrl: string;
+  theme: string;
+  status: string;
+  membersCount: number;
+  joined: boolean;
+  createdAt: string;
+}
+
+export interface CreateClubInput {
+  name: string;
+  description: string;
+  tag?: string;
+  locationText?: string;
+  coverImageUrl?: string;
+  profileImageUrl?: string;
+  theme?: string;
+}
