@@ -365,11 +365,36 @@ export async function unlikePost(postId: string, userId: string): Promise<LikeRe
 }
 
 export async function voteOnPoll(optionId: string, userId: string): Promise<void> {
-  const { error } = await supabase
+  // Find the poll this option belongs to
+  const { data: option, error: optionError } = await supabase
+    .from(POLL_OPTIONS_TABLE)
+    .select('id, post_id')
+    .eq('id', optionId)
+    .single();
+
+  if (optionError || !option) throw new Error('Poll option not found');
+
+  // One vote per user per poll: remove any existing vote in this poll first
+  const { data: siblingOptions } = await supabase
+    .from(POLL_OPTIONS_TABLE)
+    .select('id')
+    .eq('post_id', option.post_id);
+
+  const siblingIds = (siblingOptions ?? []).map((o) => o.id);
+
+  if (siblingIds.length) {
+    await supabase
+      .from(POLL_VOTES_TABLE)
+      .delete()
+      .eq('user_id', userId)
+      .in('option_id', siblingIds);
+  }
+
+  const { error: insertError } = await supabase
     .from(POLL_VOTES_TABLE)
     .insert({ option_id: optionId, user_id: userId });
 
-  if (error && error.code !== '23505') throw error;
+  if (insertError && insertError.code !== '23505') throw insertError;
 }
 
 export async function getCommunityPollResult(postId: string): Promise<CommunityPollResult | null> {
