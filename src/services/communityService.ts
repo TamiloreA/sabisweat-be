@@ -411,11 +411,14 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
 }
 
 export async function getClubs(userId?: string): Promise<ClubDetail[]> {
-  const { data: clubs, error } = await supabase
-    .from(CLUBS_TABLE)
-    .select('*')
-    .eq('status', 'approved')
-    .order('created_at', { ascending: false });
+  let query = supabase.from(CLUBS_TABLE).select('*');
+  if (userId) {
+    query = query.or(`status.eq.approved,and(status.eq.pending,created_by.eq.${userId})`);
+  } else {
+    query = query.eq('status', 'approved');
+  }
+  
+  const { data: clubs, error } = await query.order('created_at', { ascending: false });
 
   if (error) throw error;
   if (!clubs?.length) return [];
