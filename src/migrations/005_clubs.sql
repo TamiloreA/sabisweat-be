@@ -45,3 +45,7 @@ CREATE POLICY "Clubs are publicly readable"
 
 CREATE POLICY "Club members are publicly readable"
   ON public.club_members FOR SELECT USING (true);
+
+-- 4. Grants
+GRANT ALL ON TABLE public.clubs TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.club_members TO anon, authenticated, service_role;
