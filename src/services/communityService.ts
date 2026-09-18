@@ -13,6 +13,8 @@ import {
   CreateClubInput,
   CreateEventInput,
   ClubEvent,
+  CommunityPollResult,
+  PollResultOption,
 } from '../models/communityModel';
 
 const POSTS_TABLE = 'community_posts';
@@ -362,6 +364,70 @@ export async function voteOnPoll(optionId: string, userId: string): Promise<void
     .insert({ option_id: optionId, user_id: userId });
 
   if (error && error.code !== '23505') throw error;
+}
+
+export async function getCommunityPollResult(postId: string): Promise<CommunityPollResult | null> {
+  const { data: post, error: postError } = await supabase
+    .from(POSTS_TABLE)
+    .select('id, title, club_id')
+    .eq('id', postId)
+    .single();
+
+  if (postError || !post) return null;
+
+  const { data: options, error: optionsError } = await supabase
+    .from(POLL_OPTIONS_TABLE)
+    .select('id, text')
+    .eq('post_id', postId)
+    .order('sort_order', { ascending: true });
+
+  if (optionsError) throw optionsError;
+  if (!options?.length) return null;
+
+  const optionIds = options.map((o) => o.id);
+  const { data: votes, error: votesError } = await supabase
+    .from(POLL_VOTES_TABLE)
+    .select('option_id, created_at, author:profiles(id, username, first_name, last_name, photo_url, photo_base64, avatar_id)')
+    .in('option_id', optionIds)
+    .order('created_at', { ascending: false });
+
+  if (votesError) throw votesError;
+
+  let totalMembers = 0;
+  if (post.club_id) {
+    const { count } = await supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .select('*', { count: 'exact', head: true })
+      .eq('club_id', post.club_id);
+    totalMembers = count ?? 0;
+  }
+
+  const resultOptions: PollResultOption[] = options.map((opt) => {
+    const optionVotes = (votes || []).filter((v) => v.option_id === opt.id);
+    return {
+      id: opt.id,
+      text: opt.text,
+      votesCount: optionVotes.length,
+      voters: optionVotes.map((v) => {
+        const p = Array.isArray(v.author) ? v.author[0] : v.author;
+        return {
+          id: p?.id ?? 'unknown',
+          username: p?.username ?? undefined,
+          firstName: p?.first_name ?? undefined,
+          lastName: p?.last_name ?? undefined,
+          photoUrl: p?.photo_url ?? (p?.photo_base64 ? `data:image/jpeg;base64,${p.photo_base64}` : undefined),
+          avatarId: p?.avatar_id ?? undefined,
+        };
+      }),
+    };
+  });
+
+  return {
+    question: post.title || 'Poll',
+    totalVotes: votes?.length || 0,
+    totalMembers,
+    options: resultOptions,
+  };
 }
 
 async function getLikesCount(postId: string): Promise<number> {

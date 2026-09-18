@@ -19,6 +19,29 @@ export interface PollOption {
   votedByMe: boolean;
 }
 
+export interface PollVoter {
+  id: string;
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  photoUrl?: string;
+  avatarId?: string;
+}
+
+export interface PollResultOption {
+  id: string;
+  text: string;
+  votesCount: number;
+  voters: PollVoter[];
+}
+
+export interface CommunityPollResult {
+  question: string;
+  totalVotes: number;
+  totalMembers: number;
+  options: PollResultOption[];
+}
+
 export interface FeedPost {
   id: string;
   title: string;

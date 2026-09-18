@@ -186,6 +186,19 @@ export const voteOnPoll = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+export const getCommunityPollResult = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await communityService.getCommunityPollResult(req.params.id);
+    if (!result) {
+      res.status(404).json({ success: false, message: 'Poll not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const createClubEvent = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { title, description, locationText, startAt, coverImageUrl } = req.body ?? {};
