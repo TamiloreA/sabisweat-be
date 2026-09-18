@@ -448,6 +448,7 @@ export async function getCommunityPollResult(postId: string): Promise<CommunityP
           lastName: p?.last_name ?? undefined,
           photoUrl: p?.photo_url ?? (p?.photo_base64 ? `data:image/jpeg;base64,${p.photo_base64}` : undefined),
           avatarId: p?.avatar_id ?? undefined,
+          votedAt: v.created_at,
         };
       }),
     };
