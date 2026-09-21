@@ -631,7 +631,8 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
     theme: clubData.theme,
     status: clubData.status,
     membersCount: 1,
-    joined: true,
+    joinStatus: 'joined',
+    isAdmin: true,
     createdAt: clubData.created_at,
   };
 }
@@ -654,7 +655,7 @@ export async function getClubs(userId?: string): Promise<ClubDetail[]> {
   // Fetch all members to compute counts and joined status
   const { data: membersRes, error: membersError } = await supabase
     .from(CLUB_MEMBERS_TABLE)
-    .select('club_id, user_id')
+    .select('club_id, user_id, role')
     .in('club_id', clubIds);
 
   if (membersError) throw membersError;
@@ -669,6 +670,28 @@ export async function getClubs(userId?: string): Promise<ClubDetail[]> {
     }
   }
 
+  const myAdminClubs = new Set<string>();
+  if (userId) {
+    for (const member of membersRes ?? []) {
+      if (member.user_id === userId && member.role === 'admin') {
+        myAdminClubs.add(member.club_id);
+      }
+    }
+  }
+
+  const myPendingRequests = new Set<string>();
+  if (userId && clubIds.length > 0) {
+    const { data: reqs } = await supabase
+      .from('club_join_requests')
+      .select('club_id')
+      .eq('user_id', userId)
+      .eq('status', 'pending')
+      .in('club_id', clubIds);
+    for (const req of reqs ?? []) {
+      myPendingRequests.add(req.club_id);
+    }
+  }
+
   return clubs.map((club: any) => ({
     id: club.id,
     name: club.name,
@@ -680,7 +703,8 @@ export async function getClubs(userId?: string): Promise<ClubDetail[]> {
     theme: club.theme,
     status: club.status,
     membersCount: memberCounts.get(club.id) ?? 0,
-    joined: userId ? myJoinedClubs.has(club.id) : false,
+    joinStatus: userId ? (myJoinedClubs.has(club.id) ? 'joined' : (myPendingRequests.has(club.id) ? 'pending' : 'none')) : 'none',
+    isAdmin: userId ? myAdminClubs.has(club.id) : false,
     createdAt: club.created_at,
   }));
 }
@@ -696,10 +720,23 @@ export async function getClubById(clubId: string, userId?: string): Promise<Club
 
   const { data: membersRes } = await supabase
     .from(CLUB_MEMBERS_TABLE)
-    .select('user_id')
+    .select('user_id, role')
     .eq('club_id', clubId);
 
   const members = membersRes ?? [];
+  const isMember = userId ? members.some((m) => m.user_id === userId) : false;
+  let isPending = false;
+  
+  if (userId && !isMember) {
+    const { data: reqs } = await supabase
+      .from('club_join_requests')
+      .select('status')
+      .eq('club_id', clubId)
+      .eq('user_id', userId)
+      .eq('status', 'pending')
+      .single();
+    if (reqs) isPending = true;
+  }
 
   return {
     id: club.id,
@@ -712,7 +749,8 @@ export async function getClubById(clubId: string, userId?: string): Promise<Club
     theme: club.theme,
     status: club.status,
     membersCount: members.length,
-    joined: userId ? members.some((m) => m.user_id === userId) : false,
+    joinStatus: userId ? (isMember ? 'joined' : (isPending ? 'pending' : 'none')) : 'none',
+    isAdmin: userId ? members.some((m) => m.user_id === userId && m.role === 'admin') : false,
     createdAt: club.created_at,
   };
 }
@@ -816,5 +854,129 @@ export async function rsvpClubEvent(eventId: string, userId: string, rsvp: boole
       .eq('event_id', eventId)
       .eq('user_id', userId);
     if (error) throw error;
+  }
+}
+
+export async function requestJoinClub(clubId: string, userId: string): Promise<void> {
+  const { data: existingMember } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('user_id')
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .single();
+
+  if (existingMember) throw new Error('User is already a member');
+
+  const { data: existingRequest } = await supabase
+    .from('club_join_requests')
+    .select('status')
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .single();
+
+  if (existingRequest) {
+    if (existingRequest.status === 'pending') throw new Error('Join request is already pending');
+    if (existingRequest.status === 'approved') throw new Error('Join request is already approved');
+    // If rejected, allow re-requesting by updating status
+    const { error } = await supabase
+      .from('club_join_requests')
+      .update({ status: 'pending', updated_at: new Date().toISOString() })
+      .eq('club_id', clubId)
+      .eq('user_id', userId);
+    if (error) throw error;
+    return;
+  }
+
+  const { error } = await supabase
+    .from('club_join_requests')
+    .insert({
+      club_id: clubId,
+      user_id: userId,
+      status: 'pending',
+    });
+
+  if (error) throw error;
+}
+
+export async function getClubJoinRequests(clubId: string, adminUserId: string) {
+  // Check if admin
+  const { data: membership } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('user_id', adminUserId)
+    .single();
+
+  if (!membership || membership.role !== 'admin') {
+    throw new Error('Forbidden: Not an admin');
+  }
+
+  const { data: requests, error } = await supabase
+    .from('club_join_requests')
+    .select(`
+      user_id,
+      status,
+      created_at,
+      profiles (
+        id,
+        first_name,
+        last_name,
+        username,
+        photo_url,
+        avatar_id
+      )
+    `)
+    .eq('club_id', clubId)
+    .eq('status', 'pending');
+
+  if (error) throw error;
+
+  return (requests ?? []).map((req: any) => ({
+    userId: req.user_id,
+    status: req.status,
+    createdAt: req.created_at,
+    user: req.profiles ? {
+      id: req.profiles.id,
+      firstName: req.profiles.first_name,
+      lastName: req.profiles.last_name,
+      username: req.profiles.username,
+      photoUrl: req.profiles.photo_url,
+      avatarId: req.profiles.avatar_id,
+      displayName: [req.profiles.first_name, req.profiles.last_name].filter(Boolean).join(' ') || undefined,
+    } : null,
+  }));
+}
+
+export async function resolveJoinRequest(clubId: string, adminUserId: string, targetUserId: string, status: 'approved' | 'rejected') {
+  // Check if admin
+  const { data: membership } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('user_id', adminUserId)
+    .single();
+
+  if (!membership || membership.role !== 'admin') {
+    throw new Error('Forbidden: Not an admin');
+  }
+
+  const { error: updateError } = await supabase
+    .from('club_join_requests')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('club_id', clubId)
+    .eq('user_id', targetUserId)
+    .eq('status', 'pending');
+
+  if (updateError) throw updateError;
+
+  if (status === 'approved') {
+    const { error: insertError } = await supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .insert({
+        club_id: clubId,
+        user_id: targetUserId,
+        role: 'member',
+      });
+    if (insertError) throw insertError;
   }
 }

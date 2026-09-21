@@ -253,3 +253,35 @@ export const rsvpClubEvent = async (req: Request, res: Response, next: NextFunct
     next(error);
   }
 };
+
+export const requestJoinClub = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await communityService.requestJoinClub(req.params.id, req.user!.id);
+    res.status(200).json({ success: true, message: 'Join request sent' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getClubJoinRequests = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const requests = await communityService.getClubJoinRequests(req.params.id, req.user!.id);
+    res.status(200).json({ success: true, data: requests });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resolveJoinRequest = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { status } = req.body ?? {};
+    if (status !== 'approved' && status !== 'rejected') {
+      res.status(400).json({ success: false, message: 'Invalid status' });
+      return;
+    }
+    await communityService.resolveJoinRequest(req.params.id, req.user!.id, req.params.userId, status);
+    res.status(200).json({ success: true, message: 'Join request resolved' });
+  } catch (error) {
+    next(error);
+  }
+};

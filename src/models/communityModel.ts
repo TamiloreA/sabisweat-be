@@ -122,7 +122,8 @@ export interface ClubDetail {
   theme: string;
   status: string;
   membersCount: number;
-  joined: boolean;
+  joinStatus: 'joined' | 'pending' | 'none';
+  isAdmin: boolean;
   createdAt: string;
 }
 
