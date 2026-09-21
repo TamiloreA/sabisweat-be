@@ -488,10 +488,13 @@ export async function getClubMembers(clubId: string, page: number, size: number)
         last_name,
         username,
         photo_url,
-        avatar_id
+        avatar_id,
+        city,
+        country
       )
     `, { count: 'exact' })
     .eq('club_id', clubId)
+    .order('role', { ascending: true })
     .order('joined_at', { ascending: false })
     .range(from, to);
 
@@ -509,6 +512,7 @@ export async function getClubMembers(clubId: string, page: number, size: number)
         photoUrl: m.profiles.photo_url,
         avatarId: m.profiles.avatar_id,
         displayName: [m.profiles.first_name, m.profiles.last_name].filter(Boolean).join(' ') || undefined,
+        location: [m.profiles.city, m.profiles.country].filter(Boolean).join(', ') || undefined,
       } : null,
     })),
     page,
