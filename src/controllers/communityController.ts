@@ -285,3 +285,14 @@ export const resolveJoinRequest = async (req: Request, res: Response, next: Next
     next(error);
   }
 };
+
+export const getClubMembers = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const size = parseInt(req.query.size as string) || 10;
+    const members = await communityService.getClubMembers(req.params.id, page, size);
+    res.status(200).json({ success: true, data: members });
+  } catch (error) {
+    next(error);
+  }
+};

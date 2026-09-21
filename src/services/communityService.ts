@@ -462,6 +462,61 @@ export async function getCommunityPollResult(postId: string): Promise<CommunityP
   };
 }
 
+async function updateClubMembersCount(clubId: string) {
+  const { count, error: countError } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('*', { count: 'exact', head: true })
+    .eq('club_id', clubId);
+
+  if (!countError && count !== null) {
+    await supabase.from(CLUBS_TABLE).update({ members_count: count }).eq('id', clubId);
+  }
+}
+
+export async function getClubMembers(clubId: string, page: number, size: number) {
+  const from = (page - 1) * size;
+  const to = from + size - 1;
+
+  const { data: members, error, count } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select(`
+      role,
+      joined_at,
+      profiles (
+        id,
+        first_name,
+        last_name,
+        username,
+        photo_url,
+        avatar_id
+      )
+    `, { count: 'exact' })
+    .eq('club_id', clubId)
+    .order('joined_at', { ascending: false })
+    .range(from, to);
+
+  if (error) throw error;
+
+  return {
+    data: (members ?? []).map((m: any) => ({
+      role: m.role,
+      joinedAt: m.joined_at,
+      user: m.profiles ? {
+        id: m.profiles.id,
+        firstName: m.profiles.first_name,
+        lastName: m.profiles.last_name,
+        username: m.profiles.username,
+        photoUrl: m.profiles.photo_url,
+        avatarId: m.profiles.avatar_id,
+        displayName: [m.profiles.first_name, m.profiles.last_name].filter(Boolean).join(' ') || undefined,
+      } : null,
+    })),
+    page,
+    size,
+    total: count ?? 0,
+  };
+}
+
 async function getLikesCount(postId: string): Promise<number> {
   const { count, error } = await supabase
     .from(LIKES_TABLE)
