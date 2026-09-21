@@ -473,6 +473,30 @@ async function updateClubMembersCount(clubId: string) {
   }
 }
 
+export async function updateClubDescription(clubId: string, description: string, userId: string) {
+  // First verify user is admin
+  const { data: member } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .single();
+
+  if (!member || member.role !== 'admin') {
+    throw new Error('Only club admins can update the description');
+  }
+
+  const { data, error } = await supabase
+    .from(CLUBS_TABLE)
+    .update({ description })
+    .eq('id', clubId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
 export async function getClubMembers(clubId: string, page: number, size: number) {
   const from = (page - 1) * size;
   const to = from + size - 1;

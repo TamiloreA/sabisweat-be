@@ -286,6 +286,20 @@ export const resolveJoinRequest = async (req: Request, res: Response, next: Next
   }
 };
 
+export const updateClubDescription = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { description } = req.body;
+    if (!description) {
+      res.status(400).json({ success: false, message: 'Description is required' });
+      return;
+    }
+    const updated = await communityService.updateClubDescription(req.params.id, description, req.user!.id);
+    res.status(200).json({ success: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getClubMembers = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
