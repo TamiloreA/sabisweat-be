@@ -256,18 +256,279 @@ router.get('/posts/:id', requireAuth, getPostById);
  */
 router.post('/clubs', requireAuth, createClub);
 router.get('/clubs', requireAuth, getClubs);
+
+/**
+ * @openapi
+ * /community/clubs/{id}:
+ *   get:
+ *     summary: Get club details by ID
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Club details with current user's join status and admin flag
+ */
 router.get('/clubs/:id', requireAuth, getClubById);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/description:
+ *   patch:
+ *     summary: Update club description (admin only)
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               description:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successfully updated description
+ */
 router.patch('/clubs/:id/description', requireAuth, updateClubDescription);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/members:
+ *   get:
+ *     summary: Get paginated list of club members
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Paginated members list
+ */
 router.get('/clubs/:id/members', requireAuth, getClubMembers);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/posts:
+ *   get:
+ *     summary: Get paginated list of posts in a club
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Paginated posts list
+ */
 router.get('/clubs/:id/posts', requireAuth, getClubPosts);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/events:
+ *   post:
+ *     summary: Create an event in a club
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       201:
+ *         description: Event created
+ *   get:
+ *     summary: Get events in a club
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of events
+ */
 router.post('/clubs/:id/events', requireAuth, createClubEvent);
 router.get('/clubs/:id/events', requireAuth, getClubEvents);
+
+/**
+ * @openapi
+ * /community/events/{eventId}/rsvp:
+ *   post:
+ *     summary: RSVP to a club event
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: eventId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [attending, maybe, declined]
+ *     responses:
+ *       200:
+ *         description: RSVP successful
+ */
 router.post('/events/:eventId/rsvp', requireAuth, rsvpClubEvent);
+
+/**
+ * @openapi
+ * /community/polls/vote:
+ *   post:
+ *     summary: Vote on a poll
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               pollId:
+ *                 type: string
+ *               optionId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Vote recorded
+ */
 router.post('/polls/vote', requireAuth, voteOnPoll);
+
+/**
+ * @openapi
+ * /community/posts/{id}/poll/results:
+ *   get:
+ *     summary: Get poll results
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Poll results
+ */
 router.get('/posts/:id/poll/results', requireAuth, getCommunityPollResult);
 
+/**
+ * @openapi
+ * /community/clubs/{id}/join:
+ *   post:
+ *     summary: Request to join a club
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Join request submitted or accepted
+ */
 router.post('/clubs/:id/join', requireAuth, requestJoinClub);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/requests:
+ *   get:
+ *     summary: Get pending join requests for a club (admin only)
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of pending join requests
+ */
 router.get('/clubs/:id/requests', requireAuth, getClubJoinRequests);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/requests/{userId}/resolve:
+ *   post:
+ *     summary: Resolve a join request (approve/reject)
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [approved, rejected]
+ *     responses:
+ *       200:
+ *         description: Request resolved
+ */
 router.post('/clubs/:id/requests/:userId/resolve', requireAuth, resolveJoinRequest);
 
 export default router;
