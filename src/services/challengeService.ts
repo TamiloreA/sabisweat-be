@@ -84,9 +84,14 @@ async function getParticipantsCount(challengeId: string): Promise<number> {
  */
 async function computeProgress(
   userId: string,
-  challengeRow: ChallengeRow
+  challengeRow: ChallengeRow,
+  joinedAtStr?: string
 ): Promise<ChallengeProgress> {
-  const startDate = new Date(challengeRow.start_at).toISOString().split('T')[0];
+  const challengeStart = new Date(challengeRow.start_at);
+  const joinedAt = joinedAtStr ? new Date(joinedAtStr) : challengeStart;
+  const effectiveStart = joinedAt > challengeStart ? joinedAt : challengeStart;
+  
+  const startDate = effectiveStart.toISOString().split('T')[0];
   const endDate = new Date(challengeRow.end_at).toISOString().split('T')[0];
   const today = new Date().toISOString().split('T')[0];
 
@@ -229,7 +234,10 @@ export async function getActiveChallenges(userId: string): Promise<ChallengeResp
   const counts = await Promise.all(countPromises);
 
   // 4. Compute progress for each
-  const progressPromises = challenges.map((c) => computeProgress(userId, c as ChallengeRow));
+  const progressPromises = challenges.map((c) => {
+    const part = partMap.get(c.id);
+    return computeProgress(userId, c as ChallengeRow, part?.joined_at);
+  });
   const progressResults = await Promise.all(progressPromises);
 
   // 5. Map to response
@@ -334,7 +342,7 @@ export async function getChallengeById(
   // 4. Compute progress if joined
   let progress: ChallengeProgress | undefined;
   if (joined) {
-    progress = await computeProgress(userId, challenge as ChallengeRow);
+    progress = await computeProgress(userId, challenge as ChallengeRow, participant.joined_at);
   }
 
   return mapChallengeRow(
@@ -443,7 +451,7 @@ export async function getLeaderboard(
   // 2. Get all active participants
   const { data: participants, error: pError } = await supabase
     .from(PARTICIPANTS_TABLE)
-    .select('user_id')
+    .select('user_id, joined_at')
     .eq('challenge_id', challengeId)
     .is('left_at', null);
 
@@ -453,22 +461,31 @@ export async function getLeaderboard(
   }
 
   const participantIds = participants.map((p) => p.user_id);
+  const partMap = new Map(participants.map((p) => [p.user_id, p.joined_at]));
 
   // 3. Get daily_steps aggregated per user for the challenge period
   // We fetch all steps rows for these users in the date range, then aggregate in-memory
   const { data: stepsData, error: sError } = await supabase
     .from(DAILY_STEPS_TABLE)
-    .select('user_id, steps')
+    .select('user_id, steps, date')
     .in('user_id', participantIds)
     .gte('date', startDate)
     .lte('date', endDate);
 
   if (sError) throw sError;
 
-  // Aggregate steps per user
+  // Aggregate steps per user (only counting steps on or after they joined)
   const stepsMap = new Map<string, number>();
   for (const row of stepsData ?? []) {
-    stepsMap.set(row.user_id, (stepsMap.get(row.user_id) || 0) + (row.steps || 0));
+    const pJoinedAt = partMap.get(row.user_id);
+    const challengeStartStr = new Date(challenge.start_at).toISOString().split('T')[0];
+    const effectiveStart = pJoinedAt 
+      ? new Date(Math.max(new Date(challenge.start_at).getTime(), new Date(pJoinedAt).getTime())).toISOString().split('T')[0]
+      : challengeStartStr;
+      
+    if (row.date >= effectiveStart) {
+      stepsMap.set(row.user_id, (stepsMap.get(row.user_id) || 0) + (row.steps || 0));
+    }
   }
 
   // Sort by total steps descending
