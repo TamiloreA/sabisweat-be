@@ -22,7 +22,8 @@ const router = Router();
  * @openapi
  * /challenges/active:
  *   get:
- *     summary: Get challenges the current user has joined (with progress)
+ *     summary: Get challenges the current user has joined
+ *     description: Returns active joined challenges along with progress data. Note that progress (steps) is calculated starting from the date the user joined the challenge (joined_at), not the challenge start date.
  *     tags: [Challenges]
  *     security:
  *       - bearerAuth: []
@@ -65,7 +66,8 @@ router.get('/available', requireAuth, getAvailableChallenges);
  * @openapi
  * /challenges/{id}:
  *   get:
- *     summary: Get a single challenge by ID (with user join status and progress)
+ *     summary: Get a single challenge by ID
+ *     description: Returns challenge details, user join status, and progress. Progress steps are only counted from the date the user joined the challenge.
  *     tags: [Challenges]
  *     security:
  *       - bearerAuth: []
@@ -137,7 +139,8 @@ router.post('/:id/leave', requireAuth, leaveChallenge);
  * @openapi
  * /challenges/{id}/leaderboard:
  *   get:
- *     summary: Get challenge leaderboard (paginated, ranked by total steps)
+ *     summary: Get challenge leaderboard (paginated)
+ *     description: Ranked by total steps. Steps are only counted from the date each user joined the challenge.
  *     tags: [Challenges]
  *     security:
  *       - bearerAuth: []
