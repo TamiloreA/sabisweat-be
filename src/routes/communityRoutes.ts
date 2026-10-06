@@ -242,6 +242,18 @@ router.get('/posts/:id', requireAuth, getPostById);
  *             properties:
  *               name:
  *                 type: string
+ *               description:
+ *                 type: string
+ *               tag:
+ *                 type: string
+ *               locationText:
+ *                 type: string
+ *               coverImageUrl:
+ *                 type: string
+ *               profileImageUrl:
+ *                 type: string
+ *               theme:
+ *                 type: string
  *     responses:
  *       201:
  *         description: Club created
