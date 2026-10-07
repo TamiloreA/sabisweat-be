@@ -12,8 +12,12 @@ const options: swaggerJsdoc.Options = {
     },
     servers: [
       {
+        url: 'https://sabisweat-be.onrender.com/api/v1',
+        description: 'Production Server',
+      },
+      {
         url: 'http://localhost:4000/api/v1',
-        description: 'Local development server',
+        description: 'Local Development Server',
       },
     ],
     components: {
