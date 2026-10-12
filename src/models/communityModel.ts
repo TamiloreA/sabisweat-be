@@ -113,6 +113,7 @@ export interface CreateCommentResult {
 
 export interface ClubDetail {
   id: string;
+  clubId?: string;
   name: string;
   description: string;
   tag: string;
@@ -129,6 +130,7 @@ export interface ClubDetail {
 
 export interface CreateClubInput {
   name: string;
+  clubId?: string;
   description: string;
   tag?: string;
   locationText?: string;

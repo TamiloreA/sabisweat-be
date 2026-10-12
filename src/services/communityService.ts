@@ -690,6 +690,8 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
     }
   }
 
+  const tagValue = (input.clubId ? input.clubId.trim().replace(/^@/, '') : input.tag) ?? 'General';
+
   // Create club
   const { data: clubData, error: clubError } = await supabase
     .from(CLUBS_TABLE)
@@ -697,7 +699,7 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
       id: clubId,
       name: input.name,
       description: input.description ?? '',
-      tag: input.tag ?? 'General',
+      tag: tagValue,
       location_text: input.locationText ?? '',
       cover_image_url: input.coverImageUrl ?? '',
       profile_image_url: profileImageUrl,
@@ -723,6 +725,7 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
 
   return {
     id: clubData.id,
+    clubId: clubData.tag || clubData.id,
     name: clubData.name,
     description: clubData.description,
     tag: clubData.tag,
@@ -795,6 +798,7 @@ export async function getClubs(userId?: string): Promise<ClubDetail[]> {
 
   return clubs.map((club: any) => ({
     id: club.id,
+    clubId: club.tag || club.id,
     name: club.name,
     description: club.description,
     tag: club.tag,
@@ -841,6 +845,7 @@ export async function getClubById(clubId: string, userId?: string): Promise<Club
 
   return {
     id: club.id,
+    clubId: club.tag || club.id,
     name: club.name,
     description: club.description,
     tag: club.tag,

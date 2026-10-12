@@ -238,12 +238,16 @@ router.get('/posts/:id', requireAuth, getPostById);
  *         application/json:
  *           schema:
  *             type: object
- *             required: [name, description, tag, locationText]
+ *             required: [name, clubId, description, locationText]
  *             properties:
  *               name:
  *                 type: string
  *                 description: Club name
  *                 example: The Movers
+ *               clubId:
+ *                 type: string
+ *                 description: Club handle / ID entered in Step 2 (e.g. @the_movers)
+ *                 example: "@the_movers"
  *               description:
  *                 type: string
  *                 description: Club overview and goals

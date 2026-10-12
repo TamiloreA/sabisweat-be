@@ -111,7 +111,7 @@ export const getPostById = async (req: Request, res: Response, next: NextFunctio
 
 export const createClub = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, description, tag, locationText, coverImageUrl, profileImageUrl, profileImageBase64, isPrivate, theme } = req.body ?? {};
+    const { name, clubId, description, tag, locationText, coverImageUrl, profileImageUrl, profileImageBase64, isPrivate, theme } = req.body ?? {};
 
     if (typeof name !== 'string' || !name.trim()) {
       res.status(400).json({ success: false, message: 'name is required' });
@@ -121,6 +121,7 @@ export const createClub = async (req: Request, res: Response, next: NextFunction
     const club = await communityService.createClub(
       {
         name: name.trim(),
+        clubId: typeof clubId === 'string' ? clubId.trim() : undefined,
         description: typeof description === 'string' ? description.trim() : '',
         tag: typeof tag === 'string' ? tag.trim() : undefined,
         locationText: typeof locationText === 'string' ? locationText.trim() : undefined,
