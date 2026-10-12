@@ -672,6 +672,24 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
 
   const clubId = randomUUID();
 
+  let profileImageUrl = input.profileImageUrl ?? '';
+  if (input.profileImageBase64) {
+    const parsed = parseBase64Image(input.profileImageBase64);
+    if (parsed) {
+      const path = `clubs/${clubId}/profile_${randomUUID()}.${parsed.extension}`;
+      const { error: uploadError } = await supabase.storage
+        .from(IMAGES_BUCKET)
+        .upload(path, parsed.buffer, { contentType: parsed.contentType });
+
+      if (!uploadError) {
+        const { data: urlData } = supabase.storage.from(IMAGES_BUCKET).getPublicUrl(path);
+        profileImageUrl = urlData.publicUrl;
+      } else {
+        console.warn('Club profile image upload failed:', uploadError.message);
+      }
+    }
+  }
+
   // Create club
   const { data: clubData, error: clubError } = await supabase
     .from(CLUBS_TABLE)
@@ -682,7 +700,7 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
       tag: input.tag ?? 'General',
       location_text: input.locationText ?? '',
       cover_image_url: input.coverImageUrl ?? '',
-      profile_image_url: input.profileImageUrl ?? '',
+      profile_image_url: profileImageUrl,
       theme: input.theme ?? 'green',
       status: 'pending',
       created_by: author.sub,

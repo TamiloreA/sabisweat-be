@@ -134,6 +134,8 @@ export interface CreateClubInput {
   locationText?: string;
   coverImageUrl?: string;
   profileImageUrl?: string;
+  profileImageBase64?: string;
+  isPrivate?: boolean;
   theme?: string;
 }
 

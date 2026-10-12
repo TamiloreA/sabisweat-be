@@ -238,22 +238,43 @@ router.get('/posts/:id', requireAuth, getPostById);
  *         application/json:
  *           schema:
  *             type: object
- *             required: [name]
+ *             required: [name, description, tag, locationText]
  *             properties:
  *               name:
  *                 type: string
+ *                 description: Club name
+ *                 example: The Movers
  *               description:
  *                 type: string
+ *                 description: Club overview and goals
+ *                 example: A community for weekend runners and fitness enthusiasts.
  *               tag:
  *                 type: string
+ *                 enum: [brand, team, employee, friends]
+ *                 description: Club category/type
+ *                 example: brand
  *               locationText:
  *                 type: string
- *               coverImageUrl:
+ *                 description: Club location or "Global"
+ *                 example: Global
+ *               profileImageBase64:
  *                 type: string
+ *                 description: Base64 string or data URL (data:image/jpeg;base64,...) for club profile photo
  *               profileImageUrl:
  *                 type: string
+ *                 description: Direct URL for club profile photo (optional)
+ *               isPrivate:
+ *                 type: boolean
+ *                 description: Whether the club is private (join by request) or public
+ *                 default: false
+ *               coverImageUrl:
+ *                 type: string
+ *                 description: Direct URL for club cover banner image (optional)
  *               theme:
  *                 type: string
+ *                 description: Color theme for the club
+ *                 default: green
+ *                 example: green
  *     responses:
  *       201:
  *         description: Club created

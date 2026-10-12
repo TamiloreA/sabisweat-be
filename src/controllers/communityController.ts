@@ -111,7 +111,7 @@ export const getPostById = async (req: Request, res: Response, next: NextFunctio
 
 export const createClub = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, description, tag, locationText, coverImageUrl, profileImageUrl, theme } = req.body ?? {};
+    const { name, description, tag, locationText, coverImageUrl, profileImageUrl, profileImageBase64, isPrivate, theme } = req.body ?? {};
 
     if (typeof name !== 'string' || !name.trim()) {
       res.status(400).json({ success: false, message: 'name is required' });
@@ -126,6 +126,8 @@ export const createClub = async (req: Request, res: Response, next: NextFunction
         locationText: typeof locationText === 'string' ? locationText.trim() : undefined,
         coverImageUrl: typeof coverImageUrl === 'string' ? coverImageUrl.trim() : undefined,
         profileImageUrl: typeof profileImageUrl === 'string' ? profileImageUrl.trim() : undefined,
+        profileImageBase64: typeof profileImageBase64 === 'string' ? profileImageBase64 : undefined,
+        isPrivate: typeof isPrivate === 'boolean' ? isPrivate : undefined,
         theme: typeof theme === 'string' ? theme.trim() : undefined,
       },
       req.user!
