@@ -4,6 +4,7 @@
  * Business logic for challenges: CRUD, join/leave, leaderboard, progress computation.
  */
 
+import { randomUUID } from 'crypto';
 import { supabase } from '../config/database';
 import type {
   ChallengeRow,
@@ -11,6 +12,7 @@ import type {
   ChallengeProgress,
   LeaderboardEntry,
   LeaderboardResponse,
+  CreateChallengeInput,
 } from '../models/challengeModel';
 
 const CHALLENGES_TABLE = 'challenges';
@@ -18,6 +20,27 @@ const PARTICIPANTS_TABLE = 'challenge_participants';
 const DAILY_STEPS_TABLE = 'daily_steps';
 const PROFILES_TABLE = 'profiles';
 const CLUBS_TABLE = 'clubs';
+const CLUB_MEMBERS_TABLE = 'club_members';
+const IMAGES_BUCKET = 'community-images';
+
+const DATA_URL_PREFIX = /^data:(image\/[\w+.-]+);base64,/;
+
+function parseBase64Image(input: string): { buffer: Buffer; contentType: string; extension: string } | null {
+  if (!input || typeof input !== 'string') return null;
+
+  const match = input.match(DATA_URL_PREFIX);
+  const base64Data = match ? input.replace(DATA_URL_PREFIX, '') : input;
+  const contentType = match ? match[1] : 'image/jpeg';
+  const extension = contentType.split('/')[1]?.replace('+xml', '') || 'jpg';
+
+  try {
+    const buffer = Buffer.from(base64Data, 'base64');
+    if (buffer.length === 0) return null;
+    return { buffer, contentType, extension };
+  } catch {
+    return null;
+  }
+}
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -669,4 +692,152 @@ export async function claimReward(
   if (uError) throw uError;
 
   return { ok: true };
+}
+
+/**
+ * POST /challenges
+ * Create a new challenge (standalone or club-hosted).
+ */
+export async function createChallenge(
+  input: CreateChallengeInput,
+  userId: string
+): Promise<ChallengeResponse> {
+  const challengeId = randomUUID();
+
+  // Validate dates
+  const startAt = new Date(input.startAt);
+  const endAt = new Date(input.endAt);
+  if (isNaN(startAt.getTime()) || isNaN(endAt.getTime())) {
+    throw { status: 400, message: 'Invalid startAt or endAt date format' };
+  }
+  if (endAt <= startAt) {
+    throw { status: 400, message: 'endAt must be after startAt' };
+  }
+
+  let hostClubId: string | null = null;
+  let hostName = input.hostName;
+  let hostLogoUrl = input.hostLogoUrl;
+
+  // If club specified, verify club & verify user is admin
+  if (input.hostClubId) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.hostClubId);
+    let club: any = null;
+
+    if (!isUuid) {
+      const sanitizedTag = input.hostClubId.replace(/^@/, '');
+      const { data } = await supabase
+        .from(CLUBS_TABLE)
+        .select('id, name, profile_image_url')
+        .eq('tag', sanitizedTag)
+        .maybeSingle();
+      club = data;
+    } else {
+      const { data } = await supabase
+        .from(CLUBS_TABLE)
+        .select('id, name, profile_image_url')
+        .eq('id', input.hostClubId)
+        .maybeSingle();
+      club = data;
+    }
+
+    if (!club) {
+      throw { status: 404, message: 'Club not found' };
+    }
+
+    hostClubId = club.id;
+
+    // Verify admin membership
+    const { data: member } = await supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .select('role')
+      .eq('club_id', club.id)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (!member || member.role !== 'admin') {
+      throw { status: 403, message: 'Only club admins can create challenges for this club' };
+    }
+
+    if (!hostName) hostName = club.name;
+    if (!hostLogoUrl) hostLogoUrl = club.profile_image_url;
+  } else if (!hostName) {
+    // Default hostName to user's displayName or 'Sabi Sweat'
+    const profileMap = await fetchProfilesMap([userId]);
+    const userProfile = profileMap.get(userId);
+    hostName = [userProfile?.first_name, userProfile?.last_name].filter(Boolean).join(' ') || userProfile?.username || 'Sabi Sweat';
+  }
+
+  // Upload hero image if base64 provided
+  let heroImageUrl = input.heroImageUrl ?? null;
+  if (input.heroImageBase64) {
+    const parsed = parseBase64Image(input.heroImageBase64);
+    if (parsed) {
+      const path = `challenges/${challengeId}/hero_${randomUUID()}.${parsed.extension}`;
+      const { error: uploadErr } = await supabase.storage
+        .from(IMAGES_BUCKET)
+        .upload(path, parsed.buffer, { contentType: parsed.contentType });
+
+      if (!uploadErr) {
+        const { data: urlData } = supabase.storage.from(IMAGES_BUCKET).getPublicUrl(path);
+        heroImageUrl = urlData.publicUrl;
+      } else {
+        console.warn('Hero image upload failed:', uploadErr.message);
+      }
+    }
+  }
+
+  // Upload challenge image if base64 provided
+  let challengeImageUrl = input.challengeImage ?? null;
+  if (input.challengeImageBase64) {
+    const parsed = parseBase64Image(input.challengeImageBase64);
+    if (parsed) {
+      const path = `challenges/${challengeId}/challenge_${randomUUID()}.${parsed.extension}`;
+      const { error: uploadErr } = await supabase.storage
+        .from(IMAGES_BUCKET)
+        .upload(path, parsed.buffer, { contentType: parsed.contentType });
+
+      if (!uploadErr) {
+        const { data: urlData } = supabase.storage.from(IMAGES_BUCKET).getPublicUrl(path);
+        challengeImageUrl = urlData.publicUrl;
+      } else {
+        console.warn('Challenge image upload failed:', uploadErr.message);
+      }
+    }
+  }
+
+  // Insert challenge row
+  const rowToInsert = {
+    id: challengeId,
+    title: input.title,
+    subtitle: input.subtitle ?? null,
+    description: input.description ?? null,
+    reward_text: input.rewardText ?? null,
+    hero_image_url: heroImageUrl,
+    challenge_image: challengeImageUrl,
+    rules: input.rules ?? null,
+    goals: input.goals ?? null,
+    sponsor_text: input.sponsorText ?? null,
+    city_tag: input.cityTag ?? null,
+    country: input.country ?? null,
+    region: input.region ?? null,
+    goal_type: input.goalType ?? 'steps',
+    goal_value: input.goalValue ?? 10000,
+    max_participants: input.maxParticipants ?? null,
+    host_name: hostName ?? null,
+    host_logo_url: hostLogoUrl ?? null,
+    host_club_id: hostClubId,
+    start_at: startAt.toISOString(),
+    end_at: endAt.toISOString(),
+    created_by: userId,
+  };
+
+  const { data: created, error: insertError } = await supabase
+    .from(CHALLENGES_TABLE)
+    .insert(rowToInsert)
+    .select()
+    .single();
+
+  if (insertError) throw insertError;
+
+  return mapChallengeRow(created as ChallengeRow, 0, { joined: false });
 }

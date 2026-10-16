@@ -10,6 +10,7 @@ import {
   getAvailableChallenges,
   getClubChallenges,
   getChallengeById,
+  createChallenge,
   joinChallenge,
   leaveChallenge,
   getLeaderboard,
@@ -18,6 +19,115 @@ import {
 import { requireAuth } from '../middleware/auth';
 
 const router = Router();
+
+/**
+ * @openapi
+ * /challenges:
+ *   post:
+ *     summary: Create a new challenge
+ *     description: Create a standalone challenge or a challenge hosted by a club. If hostClubId is provided, the authenticated user must be a club admin. Base64 images are uploaded to storage automatically.
+ *     tags: [Challenges]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [title, startAt, endAt]
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 example: "30-Day Step Challenge"
+ *               subtitle:
+ *                 type: string
+ *                 example: "Hit 10,000 steps daily"
+ *               description:
+ *                 type: string
+ *                 example: "Walk or run every day to earn rewards."
+ *               rewardText:
+ *                 type: string
+ *                 example: "5,000 Sabi Coins + Exclusive Badge"
+ *               heroImageUrl:
+ *                 type: string
+ *               heroImageBase64:
+ *                 type: string
+ *                 description: Base64 data URL (e.g. data:image/jpeg;base64,...)
+ *               challengeImage:
+ *                 type: string
+ *               challengeImageBase64:
+ *                 type: string
+ *                 description: Base64 data URL (e.g. data:image/jpeg;base64,...)
+ *               rules:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["Must record at least 5,000 steps daily", "Synced via app tracking only"]
+ *               goals:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["Complete 5,000 steps daily for 7 days"]
+ *               hostClubId:
+ *                 type: string
+ *                 description: Club UUID or club tag/handle to associate this challenge with
+ *                 example: "43bf4206-8d65-4f35-985e-5bb49dfa68c0"
+ *               hostName:
+ *                 type: string
+ *                 example: "Ekò Runners Club"
+ *               hostLogoUrl:
+ *                 type: string
+ *               goalType:
+ *                 type: string
+ *                 default: steps
+ *                 example: steps
+ *               goalValue:
+ *                 type: integer
+ *                 example: 10000
+ *               maxParticipants:
+ *                 type: integer
+ *                 example: 500
+ *               cityTag:
+ *                 type: string
+ *                 example: Lagos
+ *               country:
+ *                 type: string
+ *                 example: Nigeria
+ *               region:
+ *                 type: string
+ *                 example: Lagos
+ *               startAt:
+ *                 type: string
+ *                 format: date-time
+ *                 example: "2026-11-01T00:00:00.000Z"
+ *               endAt:
+ *                 type: string
+ *                 format: date-time
+ *                 example: "2026-11-30T23:59:59.000Z"
+ *     responses:
+ *       201:
+ *         description: Challenge created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Challenge'
+ *       400:
+ *         description: Validation error or invalid dates
+ *       401:
+ *         description: Missing or invalid token
+ *       403:
+ *         description: Only club admins can create challenges for this club
+ *       404:
+ *         description: Club not found
+ */
+router.post('/', requireAuth, createChallenge);
 
 /**
  * @openapi

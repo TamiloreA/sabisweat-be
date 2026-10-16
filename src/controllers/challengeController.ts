@@ -114,3 +114,83 @@ export const claimReward = async (req: Request, res: Response, next: NextFunctio
     next(error);
   }
 };
+
+export const createChallenge = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const {
+      title,
+      subtitle,
+      description,
+      rewardText,
+      heroImageUrl,
+      heroImageBase64,
+      challengeImage,
+      challengeImageBase64,
+      rules,
+      goals,
+      sponsorText,
+      cityTag,
+      country,
+      region,
+      goalType,
+      goalValue,
+      maxParticipants,
+      hostName,
+      hostLogoUrl,
+      hostClubId: bodyHostClubId,
+      startAt,
+      endAt,
+    } = req.body ?? {};
+
+    const hostClubId = req.params.id || req.params.clubId || bodyHostClubId;
+
+    if (typeof title !== 'string' || !title.trim()) {
+      res.status(400).json({ success: false, message: 'title is required' });
+      return;
+    }
+    if (typeof startAt !== 'string' || !startAt.trim()) {
+      res.status(400).json({ success: false, message: 'startAt is required' });
+      return;
+    }
+    if (typeof endAt !== 'string' || !endAt.trim()) {
+      res.status(400).json({ success: false, message: 'endAt is required' });
+      return;
+    }
+
+    const challenge = await challengeService.createChallenge(
+      {
+        title: title.trim(),
+        subtitle: typeof subtitle === 'string' ? subtitle.trim() : undefined,
+        description: typeof description === 'string' ? description.trim() : undefined,
+        rewardText: typeof rewardText === 'string' ? rewardText.trim() : undefined,
+        heroImageUrl: typeof heroImageUrl === 'string' ? heroImageUrl.trim() : undefined,
+        heroImageBase64: typeof heroImageBase64 === 'string' ? heroImageBase64 : undefined,
+        challengeImage: typeof challengeImage === 'string' ? challengeImage.trim() : undefined,
+        challengeImageBase64: typeof challengeImageBase64 === 'string' ? challengeImageBase64 : undefined,
+        rules: Array.isArray(rules) ? rules : undefined,
+        goals: Array.isArray(goals) ? goals : undefined,
+        sponsorText: typeof sponsorText === 'string' ? sponsorText.trim() : undefined,
+        cityTag: typeof cityTag === 'string' ? cityTag.trim() : undefined,
+        country: typeof country === 'string' ? country.trim() : undefined,
+        region: typeof region === 'string' ? region.trim() : undefined,
+        goalType: typeof goalType === 'string' ? goalType.trim() : undefined,
+        goalValue: typeof goalValue === 'number' ? goalValue : (Number(goalValue) || undefined),
+        maxParticipants: typeof maxParticipants === 'number' ? maxParticipants : (Number(maxParticipants) || undefined),
+        hostName: typeof hostName === 'string' ? hostName.trim() : undefined,
+        hostLogoUrl: typeof hostLogoUrl === 'string' ? hostLogoUrl.trim() : undefined,
+        hostClubId: typeof hostClubId === 'string' ? hostClubId.trim() : undefined,
+        startAt: startAt.trim(),
+        endAt: endAt.trim(),
+      },
+      req.user!.id
+    );
+
+    res.status(201).json({ success: true, data: challenge });
+  } catch (error: any) {
+    if (error.status) {
+      res.status(error.status).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+};

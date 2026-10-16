@@ -4,6 +4,31 @@
  * TypeScript interfaces for the challenges domain.
  */
 
+export interface CreateChallengeInput {
+  title: string;
+  subtitle?: string;
+  description?: string;
+  rewardText?: string;
+  heroImageUrl?: string;
+  heroImageBase64?: string;
+  challengeImage?: string;
+  challengeImageBase64?: string;
+  rules?: string[];
+  goals?: string[];
+  sponsorText?: string;
+  cityTag?: string;
+  country?: string;
+  region?: string;
+  goalType?: string;
+  goalValue?: number;
+  maxParticipants?: number;
+  hostName?: string;
+  hostLogoUrl?: string;
+  hostClubId?: string;
+  startAt: string;
+  endAt: string;
+}
+
 export interface ChallengeRow {
   id: string;
   title: string;
