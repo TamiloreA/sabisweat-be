@@ -17,6 +17,7 @@ const CHALLENGES_TABLE = 'challenges';
 const PARTICIPANTS_TABLE = 'challenge_participants';
 const DAILY_STEPS_TABLE = 'daily_steps';
 const PROFILES_TABLE = 'profiles';
+const CLUBS_TABLE = 'clubs';
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -301,6 +302,109 @@ export async function getAvailableChallenges(
   return available.map((c, i) =>
     mapChallengeRow(c as ChallengeRow, counts[i], { joined: false })
   );
+}
+
+export interface ClubChallengesOptions {
+  status?: 'all' | 'active' | 'upcoming' | 'past';
+}
+
+/**
+ * GET challenges owned by a club
+ * Returns all challenges hosted by a specific club.
+ */
+export async function getChallengesByClubId(
+  clubId: string,
+  userId?: string,
+  options?: ClubChallengesOptions
+): Promise<ChallengeResponse[]> {
+  // 1. Resolve club ID and ensure club exists
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clubId);
+  let resolvedClubId = clubId;
+  if (!isUuid) {
+    const sanitizedTag = clubId.replace(/^@/, '');
+    const { data: club } = await supabase
+      .from(CLUBS_TABLE)
+      .select('id')
+      .eq('tag', sanitizedTag)
+      .maybeSingle();
+    if (!club) {
+      throw { status: 404, message: 'Club not found' };
+    }
+    resolvedClubId = club.id;
+  } else {
+    const { data: club } = await supabase
+      .from(CLUBS_TABLE)
+      .select('id')
+      .eq('id', clubId)
+      .maybeSingle();
+    if (!club) {
+      throw { status: 404, message: 'Club not found' };
+    }
+  }
+
+  // 2. Query challenges for this club (ordered newest first)
+  let query = supabase
+    .from(CHALLENGES_TABLE)
+    .select('*')
+    .eq('host_club_id', resolvedClubId);
+
+  const now = new Date().toISOString();
+  if (options?.status === 'active') {
+    query = query.lte('start_at', now).gte('end_at', now);
+  } else if (options?.status === 'upcoming') {
+    query = query.gt('start_at', now);
+  } else if (options?.status === 'past') {
+    query = query.lt('end_at', now);
+  }
+
+  const { data: challenges, error: cError } = await query.order('start_at', { ascending: false });
+
+  if (cError) throw cError;
+  if (!challenges || challenges.length === 0) return [];
+
+  // 3. User participations (if userId provided)
+  let partMap = new Map<string, any>();
+  if (userId) {
+    const challengeIds = challenges.map((c) => c.id);
+    const { data: participations, error: pError } = await supabase
+      .from(PARTICIPANTS_TABLE)
+      .select('challenge_id, joined_at, claimed_at')
+      .eq('user_id', userId)
+      .in('challenge_id', challengeIds)
+      .is('left_at', null);
+
+    if (pError) throw pError;
+    partMap = new Map((participations ?? []).map((p) => [p.challenge_id, p]));
+  }
+
+  // 4. Participant counts
+  const countPromises = challenges.map((c) => getParticipantsCount(c.id));
+  const counts = await Promise.all(countPromises);
+
+  // 5. Compute user progress if joined
+  const progressPromises = challenges.map((c) => {
+    const part = partMap.get(c.id);
+    if (userId && part) {
+      return computeProgress(userId, c as ChallengeRow, part.joined_at);
+    }
+    return Promise.resolve(undefined);
+  });
+  const progressResults = await Promise.all(progressPromises);
+
+  // 6. Map to response
+  return challenges.map((c, i) => {
+    const part = partMap.get(c.id);
+    return mapChallengeRow(
+      c as ChallengeRow,
+      counts[i],
+      {
+        joined: !!part,
+        joinedAt: part?.joined_at,
+        claimedAt: part?.claimed_at ?? null,
+      },
+      progressResults[i]
+    );
+  });
 }
 
 /**

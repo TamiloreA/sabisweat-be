@@ -28,6 +28,29 @@ export const getAvailableChallenges = async (req: Request, res: Response, next: 
   }
 };
 
+export const getClubChallenges = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const clubId = (req.params.id || req.params.clubId) as string;
+    if (!clubId) {
+      res.status(400).json({ success: false, message: 'Club ID is required' });
+      return;
+    }
+    const statusParam = req.query.status;
+    const status = typeof statusParam === 'string' && ['all', 'active', 'upcoming', 'past'].includes(statusParam)
+      ? (statusParam as 'all' | 'active' | 'upcoming' | 'past')
+      : undefined;
+
+    const challenges = await challengeService.getChallengesByClubId(clubId, req.user?.id, { status });
+    res.status(200).json({ success: true, data: challenges });
+  } catch (error: any) {
+    if (error.status) {
+      res.status(error.status).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+};
+
 export const getChallengeById = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const challenge = await challengeService.getChallengeById(req.params.id, req.user!.id);

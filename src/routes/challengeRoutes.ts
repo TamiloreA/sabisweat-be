@@ -8,6 +8,7 @@ import { Router } from 'express';
 import {
   getActiveChallenges,
   getAvailableChallenges,
+  getClubChallenges,
   getChallengeById,
   joinChallenge,
   leaveChallenge,
@@ -61,6 +62,55 @@ router.get('/active', requireAuth, getActiveChallenges);
  *         description: Missing or invalid token
  */
 router.get('/available', requireAuth, getAvailableChallenges);
+
+/**
+ * @openapi
+ * /challenges/club/{clubId}:
+ *   get:
+ *     summary: Get all challenges owned by a club
+ *     description: Returns all challenges created and hosted by the specified club. If authenticated, includes the user's participation status and step progress.
+ *     tags: [Challenges]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: clubId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Unique identifier of the club (UUID) or club handle/tag (e.g. "@the_movers" or "the_movers")
+ *         example: "43bf4206-8d65-4f35-985e-5bb49dfa68c0"
+ *       - in: query
+ *         name: status
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [all, active, upcoming, past]
+ *           default: all
+ *         description: Filter challenges by status
+ *     responses:
+ *       200:
+ *         description: List of challenges owned by the club
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Challenge'
+ *       400:
+ *         description: Missing or invalid club ID
+ *       401:
+ *         description: Missing or invalid token
+ *       404:
+ *         description: Club not found
+ */
+router.get('/club/:clubId', requireAuth, getClubChallenges);
 
 /**
  * @openapi
