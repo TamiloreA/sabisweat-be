@@ -27,6 +27,8 @@ export interface CreateChallengeInput {
   hostClubId?: string;
   startAt: string;
   endAt: string;
+  whoCanJoin?: string;
+  leaderboardVisibility?: string;
 }
 
 export interface ChallengeRow {
@@ -51,6 +53,8 @@ export interface ChallengeRow {
   host_club_id: string | null;
   start_at: string;
   end_at: string;
+  who_can_join: string | null;
+  leaderboard_visibility: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -111,6 +115,8 @@ export interface ChallengeResponse {
   canClaim?: boolean;
   claimedAt?: string | null;
   progress?: ChallengeProgress;
+  whoCanJoin?: string;
+  leaderboardVisibility?: string;
 }
 
 export interface LeaderboardEntry {

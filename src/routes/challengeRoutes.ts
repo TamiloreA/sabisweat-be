@@ -97,6 +97,18 @@ const router = Router();
  *               region:
  *                 type: string
  *                 example: Lagos
+ *               whoCanJoin:
+ *                 type: string
+ *                 enum: [everyone, club_members]
+ *                 default: everyone
+ *                 description: Who is allowed to join the challenge
+ *                 example: everyone
+ *               leaderboardVisibility:
+ *                 type: string
+ *                 enum: [public, private]
+ *                 default: public
+ *                 description: Whether the leaderboard is visible to everyone or only participants
+ *                 example: public
  *               startAt:
  *                 type: string
  *                 format: date-time

@@ -219,6 +219,8 @@ function mapChallengeRow(
     canClaim,
     claimedAt: participantInfo?.claimedAt ?? null,
     progress,
+    whoCanJoin: row.who_can_join ?? 'everyone',
+    leaderboardVisibility: row.leaderboard_visibility ?? 'public',
   };
 }
 
@@ -828,6 +830,8 @@ export async function createChallenge(
     host_club_id: hostClubId,
     start_at: startAt.toISOString(),
     end_at: endAt.toISOString(),
+    who_can_join: input.whoCanJoin ?? 'everyone',
+    leaderboard_visibility: input.leaderboardVisibility ?? 'public',
     created_by: userId,
   };
 

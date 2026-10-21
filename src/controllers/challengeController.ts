@@ -140,6 +140,8 @@ export const createChallenge = async (req: Request, res: Response, next: NextFun
       hostClubId: bodyHostClubId,
       startAt,
       endAt,
+      whoCanJoin,
+      leaderboardVisibility,
     } = req.body ?? {};
 
     const hostClubId = req.params.id || req.params.clubId || bodyHostClubId;
@@ -181,6 +183,8 @@ export const createChallenge = async (req: Request, res: Response, next: NextFun
         hostClubId: typeof hostClubId === 'string' ? hostClubId.trim() : undefined,
         startAt: startAt.trim(),
         endAt: endAt.trim(),
+        whoCanJoin: typeof whoCanJoin === 'string' && ['everyone', 'club_members'].includes(whoCanJoin) ? whoCanJoin : undefined,
+        leaderboardVisibility: typeof leaderboardVisibility === 'string' && ['public', 'private'].includes(leaderboardVisibility) ? leaderboardVisibility : undefined,
       },
       req.user!.id
     );
