@@ -193,6 +193,7 @@ function mapChallengeRow(
     description: row.description ?? undefined,
     rewardText: row.reward_text || '',
     heroImageUrl: row.hero_image_url ?? undefined,
+    heroImageBase64: row.hero_image_base64 ?? undefined,
     challengeImage: row.challenge_image ?? undefined,
     rules: row.rules ?? undefined,
     goals: row.goals ?? undefined,
@@ -808,7 +809,7 @@ export async function createChallenge(
   }
 
   // Insert challenge row
-  const rowToInsert = {
+  const rowToInsert: Record<string, any> = {
     id: challengeId,
     title: input.title,
     subtitle: input.subtitle ?? null,
@@ -835,11 +836,26 @@ export async function createChallenge(
     created_by: userId,
   };
 
-  const { data: created, error: insertError } = await supabase
+  if (input.heroImageBase64) {
+    rowToInsert.hero_image_base64 = input.heroImageBase64;
+  }
+
+  let { data: created, error: insertError } = await supabase
     .from(CHALLENGES_TABLE)
     .insert(rowToInsert)
     .select()
     .single();
+
+  if (insertError && rowToInsert.hero_image_base64 && insertError.message?.includes('hero_image_base64')) {
+    delete rowToInsert.hero_image_base64;
+    const retry = await supabase
+      .from(CHALLENGES_TABLE)
+      .insert(rowToInsert)
+      .select()
+      .single();
+    created = retry.data;
+    insertError = retry.error;
+  }
 
   if (insertError) throw insertError;
 

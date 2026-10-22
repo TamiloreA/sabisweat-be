@@ -70,6 +70,7 @@ const options: swaggerJsdoc.Options = {
             description: { type: 'string', example: 'Complete a 5K run daily for a week hosted by Ekò Runners Club.' },
             rewardText: { type: 'string', example: '500 Sabi Coins' },
             heroImageUrl: { type: 'string', nullable: true, example: 'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b' },
+            heroImageBase64: { type: 'string', nullable: true, description: 'Base64 data or data URL for hero image' },
             challengeImage: { type: 'string', nullable: true },
             rules: {
               type: 'array',
@@ -98,6 +99,8 @@ const options: swaggerJsdoc.Options = {
             canClaim: { type: 'boolean', example: false },
             claimedAt: { type: 'string', format: 'date-time', nullable: true },
             progress: { $ref: '#/components/schemas/ChallengeProgress' },
+            whoCanJoin: { type: 'string', enum: ['everyone', 'club_members'], example: 'everyone' },
+            leaderboardVisibility: { type: 'string', enum: ['public', 'private'], example: 'public' },
           },
         },
       },

@@ -38,6 +38,7 @@ export interface ChallengeRow {
   description: string | null;
   reward_text: string | null;
   hero_image_url: string | null;
+  hero_image_base64?: string | null;
   challenge_image: string | null;
   rules: string[] | null;
   goals: string[] | null;
@@ -95,6 +96,7 @@ export interface ChallengeResponse {
   description?: string;
   rewardText: string;
   heroImageUrl?: string;
+  heroImageBase64?: string;
   challengeImage?: string;
   rules?: string[];
   goals?: string[];
