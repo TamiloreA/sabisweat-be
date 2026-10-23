@@ -67,6 +67,25 @@ async function fetchProfilesMap(ids: string[]): Promise<Map<string, ProfileRow>>
   return new Map((data ?? []).map((p) => [p.id, p as ProfileRow]));
 }
 
+interface ClubHostInfo {
+  id: string;
+  name: string;
+  profile_image_url: string | null;
+}
+
+async function fetchClubsMap(ids: (string | null | undefined)[]): Promise<Map<string, ClubHostInfo>> {
+  const uniqueIds = [...new Set(ids.filter((id): id is string => typeof id === 'string' && Boolean(id.trim())))];
+  if (!uniqueIds.length) return new Map();
+
+  const { data, error } = await supabase
+    .from(CLUBS_TABLE)
+    .select('id, name, profile_image_url')
+    .in('id', uniqueIds);
+
+  if (error) return new Map();
+  return new Map((data ?? []).map((c) => [c.id, c as ClubHostInfo]));
+}
+
 function mapProfileToUser(profile: ProfileRow | undefined, fallbackId: string) {
   if (!profile) return { id: fallbackId };
   const displayName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || undefined;
@@ -177,7 +196,8 @@ function mapChallengeRow(
   row: ChallengeRow,
   participantsCount: number,
   participantInfo?: { joined: boolean; joinedAt?: string; claimedAt?: string | null },
-  progress?: ChallengeProgress
+  progress?: ChallengeProgress,
+  clubInfo?: ClubHostInfo
 ): ChallengeResponse {
   const joined = participantInfo?.joined ?? false;
 
@@ -185,6 +205,10 @@ function mapChallengeRow(
   const eligible = joined && progress ? progress.percent >= 100 : false;
   // Can claim: eligible and hasn't claimed yet
   const canClaim = eligible && !participantInfo?.claimedAt;
+
+  const hostName = clubInfo?.name ?? row.host_name;
+  const hostLogoUrl = clubInfo?.profile_image_url ?? row.host_logo_url;
+  const hostClubId = clubInfo?.id ?? row.host_club_id;
 
   return {
     id: row.id,
@@ -197,11 +221,11 @@ function mapChallengeRow(
     challengeImage: row.challenge_image ?? undefined,
     rules: row.rules ?? undefined,
     goals: row.goals ?? undefined,
-    host: row.host_name
+    host: (hostName || hostClubId)
       ? {
-          name: row.host_name,
-          logoUrl: row.host_logo_url ?? undefined,
-          clubId: row.host_club_id ?? undefined,
+          name: hostName ?? '',
+          logoUrl: hostLogoUrl ?? undefined,
+          clubId: hostClubId ?? undefined,
         }
       : undefined,
     sponsorText: row.sponsor_text ?? undefined,
@@ -256,6 +280,9 @@ export async function getActiveChallenges(userId: string): Promise<ChallengeResp
   // Build a map of participations for quick lookup
   const partMap = new Map(participations.map((p) => [p.challenge_id, p]));
 
+  // Resolve clubs for challenges with host_club_id
+  const clubsMap = await fetchClubsMap(challenges.map((c) => c.host_club_id));
+
   // 3. Get participants count for each challenge
   const countPromises = challenges.map((c) => getParticipantsCount(c.id));
   const counts = await Promise.all(countPromises);
@@ -278,7 +305,8 @@ export async function getActiveChallenges(userId: string): Promise<ChallengeResp
         joinedAt: part?.joined_at,
         claimedAt: part?.claimed_at ?? null,
       },
-      progressResults[i]
+      progressResults[i],
+      clubsMap.get(c.host_club_id)
     );
   });
 }
@@ -321,12 +349,15 @@ export async function getAvailableChallenges(
   // 3. Filter out joined challenges
   const available = challenges.filter((c) => !joinedIds.has(c.id));
 
+  // Resolve clubs for available challenges
+  const clubsMap = await fetchClubsMap(available.map((c) => c.host_club_id));
+
   // 4. Get participant counts
   const countPromises = available.map((c) => getParticipantsCount(c.id));
   const counts = await Promise.all(countPromises);
 
   return available.map((c, i) =>
-    mapChallengeRow(c as ChallengeRow, counts[i], { joined: false })
+    mapChallengeRow(c as ChallengeRow, counts[i], { joined: false }, undefined, clubsMap.get(c.host_club_id))
   );
 }
 
@@ -345,28 +376,30 @@ export async function getChallengesByClubId(
 ): Promise<ChallengeResponse[]> {
   // 1. Resolve club ID and ensure club exists
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clubId);
-  let resolvedClubId = clubId;
+  let resolvedClub: ClubHostInfo | null = null;
   if (!isUuid) {
     const sanitizedTag = clubId.replace(/^@/, '');
     const { data: club } = await supabase
       .from(CLUBS_TABLE)
-      .select('id')
+      .select('id, name, profile_image_url')
       .eq('tag', sanitizedTag)
       .maybeSingle();
     if (!club) {
       throw { status: 404, message: 'Club not found' };
     }
-    resolvedClubId = club.id;
+    resolvedClub = club as ClubHostInfo;
   } else {
     const { data: club } = await supabase
       .from(CLUBS_TABLE)
-      .select('id')
+      .select('id, name, profile_image_url')
       .eq('id', clubId)
       .maybeSingle();
     if (!club) {
       throw { status: 404, message: 'Club not found' };
     }
+    resolvedClub = club as ClubHostInfo;
   }
+  const resolvedClubId = resolvedClub.id;
 
   // 2. Query challenges for this club (ordered newest first)
   let query = supabase
@@ -428,7 +461,8 @@ export async function getChallengesByClubId(
         joinedAt: part?.joined_at,
         claimedAt: part?.claimed_at ?? null,
       },
-      progressResults[i]
+      progressResults[i],
+      resolvedClub ?? undefined
     );
   });
 }
@@ -453,6 +487,19 @@ export async function getChallengeById(
     throw cError;
   }
   if (!challenge) return null;
+
+  // Resolve host details from club if host_club_id is present
+  let clubInfo: ClubHostInfo | undefined;
+  if (challenge.host_club_id) {
+    const { data: club } = await supabase
+      .from(CLUBS_TABLE)
+      .select('id, name, profile_image_url')
+      .eq('id', challenge.host_club_id)
+      .maybeSingle();
+    if (club) {
+      clubInfo = club as ClubHostInfo;
+    }
+  }
 
   // 2. Check participation
   const { data: participant, error: pError } = await supabase
@@ -483,7 +530,8 @@ export async function getChallengeById(
       joinedAt: participant?.joined_at,
       claimedAt: participant?.claimed_at ?? null,
     },
-    progress
+    progress,
+    clubInfo
   );
 }
 
@@ -720,6 +768,7 @@ export async function createChallenge(
   let hostClubId: string | null = null;
   let hostName = input.hostName;
   let hostLogoUrl = input.hostLogoUrl;
+  let clubInfo: ClubHostInfo | undefined;
 
   // If club specified, verify club & verify user is admin
   if (input.hostClubId) {
@@ -748,6 +797,7 @@ export async function createChallenge(
     }
 
     hostClubId = club.id;
+    clubInfo = club as ClubHostInfo;
 
     // Verify admin membership
     const { data: member } = await supabase
@@ -761,8 +811,9 @@ export async function createChallenge(
       throw { status: 403, message: 'Only club admins can create challenges for this club' };
     }
 
-    if (!hostName) hostName = club.name;
-    if (!hostLogoUrl) hostLogoUrl = club.profile_image_url;
+    // Always use club name and logo as the challenge host
+    hostName = club.name;
+    hostLogoUrl = club.profile_image_url;
   } else if (!hostName) {
     // Default hostName to user's displayName or 'Sabi Sweat'
     const profileMap = await fetchProfilesMap([userId]);
@@ -869,5 +920,5 @@ export async function createChallenge(
     created.reward_id = input.rewardId;
   }
 
-  return mapChallengeRow(created as ChallengeRow, 0, { joined: false });
+  return mapChallengeRow(created as ChallengeRow, 0, { joined: false }, undefined, clubInfo);
 }

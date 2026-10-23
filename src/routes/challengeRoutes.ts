@@ -75,13 +75,8 @@ const router = Router();
  *                 example: ["Complete 5,000 steps daily for 7 days"]
  *               hostClubId:
  *                 type: string
- *                 description: Club UUID or club tag/handle to associate this challenge with
+ *                 description: Club UUID or club tag/handle to associate this challenge with (host details are automatically derived from this club)
  *                 example: "43bf4206-8d65-4f35-985e-5bb49dfa68c0"
- *               hostName:
- *                 type: string
- *                 example: "Ekò Runners Club"
- *               hostLogoUrl:
- *                 type: string
  *               goalType:
  *                 type: string
  *                 default: steps
