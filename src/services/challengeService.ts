@@ -192,6 +192,7 @@ function mapChallengeRow(
     subtitle: row.subtitle || '',
     description: row.description ?? undefined,
     rewardText: row.reward_text || '',
+    rewardId: row.reward_id ?? null,
     heroImageUrl: row.hero_image_url ?? undefined,
     heroImageBase64: row.hero_image_base64 ?? undefined,
     challengeImage: row.challenge_image ?? undefined,
@@ -815,6 +816,7 @@ export async function createChallenge(
     subtitle: input.subtitle ?? null,
     description: input.description ?? null,
     reward_text: input.rewardText ?? null,
+    reward_id: input.rewardId ?? null,
     hero_image_url: heroImageUrl,
     challenge_image: challengeImageUrl,
     rules: input.rules ?? null,
@@ -846,8 +848,13 @@ export async function createChallenge(
     .select()
     .single();
 
-  if (insertError && rowToInsert.hero_image_base64 && insertError.message?.includes('hero_image_base64')) {
-    delete rowToInsert.hero_image_base64;
+  if (insertError && (insertError.message?.includes('hero_image_base64') || insertError.message?.includes('reward_id'))) {
+    if (insertError.message?.includes('hero_image_base64')) {
+      delete rowToInsert.hero_image_base64;
+    }
+    if (insertError.message?.includes('reward_id')) {
+      delete rowToInsert.reward_id;
+    }
     const retry = await supabase
       .from(CHALLENGES_TABLE)
       .insert(rowToInsert)
@@ -858,6 +865,10 @@ export async function createChallenge(
   }
 
   if (insertError) throw insertError;
+
+  if (created && input.rewardId && created.reward_id === undefined) {
+    created.reward_id = input.rewardId;
+  }
 
   return mapChallengeRow(created as ChallengeRow, 0, { joined: false });
 }

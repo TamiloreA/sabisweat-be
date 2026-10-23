@@ -590,6 +590,10 @@ router.get('/clubs/:id/challenges', requireAuth, getClubChallenges);
  *               rewardText:
  *                 type: string
  *                 example: "500 Sabi Coins"
+ *               rewardId:
+ *                 type: string
+ *                 description: Reward or badge identifier
+ *                 example: "badge_01"
  *               heroImageUrl:
  *                 type: string
  *               heroImageBase64:

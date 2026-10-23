@@ -49,6 +49,10 @@ const router = Router();
  *               rewardText:
  *                 type: string
  *                 example: "5,000 Sabi Coins + Exclusive Badge"
+ *               rewardId:
+ *                 type: string
+ *                 description: Reward or badge identifier
+ *                 example: "badge_01"
  *               heroImageUrl:
  *                 type: string
  *               heroImageBase64:

@@ -9,6 +9,7 @@ export interface CreateChallengeInput {
   subtitle?: string;
   description?: string;
   rewardText?: string;
+  rewardId?: string;
   heroImageUrl?: string;
   heroImageBase64?: string;
   challengeImage?: string;
@@ -37,6 +38,7 @@ export interface ChallengeRow {
   subtitle: string | null;
   description: string | null;
   reward_text: string | null;
+  reward_id?: string | null;
   hero_image_url: string | null;
   hero_image_base64?: string | null;
   challenge_image: string | null;
@@ -95,6 +97,7 @@ export interface ChallengeResponse {
   subtitle: string;
   description?: string;
   rewardText: string;
+  rewardId?: string | null;
   heroImageUrl?: string;
   heroImageBase64?: string;
   challengeImage?: string;
