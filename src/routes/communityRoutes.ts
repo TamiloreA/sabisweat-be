@@ -258,10 +258,36 @@ router.get('/posts/:id', requireAuth, getPostById);
  *                 enum: [brand, team, employee, friends]
  *                 description: Club category/type
  *                 example: brand
+ *               locationScope:
+ *                 type: string
+ *                 enum: [single, multiple, global]
+ *                 description: Location scope ('single' | 'multiple' | 'global')
+ *                 example: single
  *               locationText:
  *                 type: string
- *                 description: Club location or "Global"
- *                 example: Global
+ *                 description: Combined location text for display (e.g. "Lagos, Nigeria" or "Nigeria, United Kingdom" or "Global")
+ *                 example: Lagos, Nigeria
+ *               country:
+ *                 type: string
+ *                 nullable: true
+ *                 description: Name of the country (for 'single' scope)
+ *                 example: Nigeria
+ *               countryCode:
+ *                 type: string
+ *                 nullable: true
+ *                 description: 2-letter ISO code e.g. "NG" (for 'single' scope)
+ *                 example: NG
+ *               regions:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Array of region/state names (for 'single' scope)
+ *                 example: ["Lagos", "Abuja, FCT"]
+ *               countries:
+ *                 type: array
+ *                 items:
+ *                   $ref: '#/components/schemas/ClubCountry'
+ *                 description: Array of country objects (for 'multiple' scope)
  *               profileImageBase64:
  *                 type: string
  *                 description: Base64 string or data URL (data:image/jpeg;base64,...) for club profile photo
@@ -283,6 +309,10 @@ router.get('/posts/:id', requireAuth, getPostById);
  *     responses:
  *       201:
  *         description: Club created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Club'
  *   get:
  *     summary: Get all approved clubs
  *     tags: [Community]
@@ -291,6 +321,57 @@ router.get('/posts/:id', requireAuth, getPostById);
  *     responses:
  *       200:
  *         description: List of clubs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Club'
+ *               example:
+ *                 - id: "43bf4206-8d65-4f35-985e-5bb49dfa68c0"
+ *                   clubId: "@the_movers"
+ *                   name: "The Movers"
+ *                   description: "A community for weekend runners"
+ *                   tag: "brand"
+ *                   locationScope: "single"
+ *                   locationText: "Lagos, Nigeria"
+ *                   country: "Nigeria"
+ *                   countryCode: "NG"
+ *                   regions: ["Lagos", "Abuja, FCT"]
+ *                   countries: null
+ *                   coverImageUrl: null
+ *                   profileImageUrl: null
+ *                   theme: "green"
+ *                   status: "approved"
+ *                   membersCount: 12
+ *                   joinStatus: "joined"
+ *                   isAdmin: false
+ *                   createdAt: "2026-10-10T00:00:00.000Z"
+ *                 - id: "89c74820-21a4-4df1-8664-9fbb4223ba8e"
+ *                   clubId: "@global_sweaters"
+ *                   name: "Global Sweaters"
+ *                   description: "Running everywhere"
+ *                   tag: "team"
+ *                   locationScope: "multiple"
+ *                   locationText: "Nigeria, United Kingdom"
+ *                   country: null
+ *                   countryCode: null
+ *                   regions: []
+ *                   countries:
+ *                     - country: "Nigeria"
+ *                       countryCode: "NG"
+ *                       regions: ["Lagos", "Abuja, FCT"]
+ *                     - country: "United Kingdom"
+ *                       countryCode: "GB"
+ *                       regions: ["London", "Manchester"]
+ *                   coverImageUrl: null
+ *                   profileImageUrl: null
+ *                   theme: "blue"
+ *                   status: "approved"
+ *                   membersCount: 35
+ *                   joinStatus: "none"
+ *                   isAdmin: false
+ *                   createdAt: "2026-10-10T00:00:00.000Z"
  */
 router.post('/clubs', requireAuth, createClub);
 router.get('/clubs', requireAuth, getClubs);
@@ -312,6 +393,10 @@ router.get('/clubs', requireAuth, getClubs);
  *     responses:
  *       200:
  *         description: Club details with current user's join status and admin flag
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Club'
  */
 router.get('/clubs/:id', requireAuth, getClubById);
 

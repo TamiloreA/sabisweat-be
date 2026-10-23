@@ -692,23 +692,51 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
 
   const tagValue = (input.clubId ? input.clubId.trim().replace(/^@/, '') : input.tag) ?? 'General';
 
+  const locationScope = input.locationScope ?? (
+    input.countries && input.countries.length > 0
+      ? 'multiple'
+      : (input.country ? 'single' : 'global')
+  );
+
+  const rowToInsert: Record<string, any> = {
+    id: clubId,
+    name: input.name,
+    description: input.description ?? '',
+    tag: tagValue,
+    location_scope: locationScope,
+    location_text: input.locationText ?? '',
+    country: input.country ?? null,
+    country_code: input.countryCode ?? null,
+    regions: input.regions ?? [],
+    countries: input.countries ?? null,
+    cover_image_url: input.coverImageUrl ?? '',
+    profile_image_url: profileImageUrl,
+    theme: input.theme ?? 'green',
+    status: 'pending',
+    created_by: author.sub,
+  };
+
   // Create club
-  const { data: clubData, error: clubError } = await supabase
+  let { data: clubData, error: clubError } = await supabase
     .from(CLUBS_TABLE)
-    .insert({
-      id: clubId,
-      name: input.name,
-      description: input.description ?? '',
-      tag: tagValue,
-      location_text: input.locationText ?? '',
-      cover_image_url: input.coverImageUrl ?? '',
-      profile_image_url: profileImageUrl,
-      theme: input.theme ?? 'green',
-      status: 'pending',
-      created_by: author.sub,
-    })
+    .insert(rowToInsert)
     .select()
     .single();
+
+  if (clubError && clubError.message?.includes('location_scope')) {
+    delete rowToInsert.location_scope;
+    delete rowToInsert.country;
+    delete rowToInsert.country_code;
+    delete rowToInsert.regions;
+    delete rowToInsert.countries;
+    const retry = await supabase
+      .from(CLUBS_TABLE)
+      .insert(rowToInsert)
+      .select()
+      .single();
+    clubData = retry.data;
+    clubError = retry.error;
+  }
 
   if (clubError) throw clubError;
 
@@ -729,7 +757,12 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
     name: clubData.name,
     description: clubData.description,
     tag: clubData.tag,
-    locationText: clubData.location_text,
+    locationScope: clubData.location_scope || locationScope,
+    locationText: clubData.location_text || input.locationText || '',
+    country: clubData.country ?? input.country ?? null,
+    countryCode: clubData.country_code ?? input.countryCode ?? null,
+    regions: Array.isArray(clubData.regions) ? clubData.regions : (input.regions ?? []),
+    countries: clubData.countries ?? input.countries ?? null,
     coverImageUrl: clubData.cover_image_url,
     profileImageUrl: clubData.profile_image_url,
     theme: clubData.theme,
@@ -802,7 +835,12 @@ export async function getClubs(userId?: string): Promise<ClubDetail[]> {
     name: club.name,
     description: club.description,
     tag: club.tag,
-    locationText: club.location_text,
+    locationScope: club.location_scope || 'global',
+    locationText: club.location_text || '',
+    country: club.country ?? null,
+    countryCode: club.country_code ?? null,
+    regions: Array.isArray(club.regions) ? club.regions : [],
+    countries: club.countries ?? null,
     coverImageUrl: club.cover_image_url,
     profileImageUrl: club.profile_image_url,
     theme: club.theme,
@@ -849,7 +887,12 @@ export async function getClubById(clubId: string, userId?: string): Promise<Club
     name: club.name,
     description: club.description,
     tag: club.tag,
-    locationText: club.location_text,
+    locationScope: club.location_scope || 'global',
+    locationText: club.location_text || '',
+    country: club.country ?? null,
+    countryCode: club.country_code ?? null,
+    regions: Array.isArray(club.regions) ? club.regions : [],
+    countries: club.countries ?? null,
     coverImageUrl: club.cover_image_url,
     profileImageUrl: club.profile_image_url,
     theme: club.theme,

@@ -111,12 +111,32 @@ export const getPostById = async (req: Request, res: Response, next: NextFunctio
 
 export const createClub = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, clubId, description, tag, locationText, coverImageUrl, profileImageUrl, profileImageBase64, isPrivate, theme } = req.body ?? {};
+    const {
+      name,
+      clubId,
+      description,
+      tag,
+      locationScope,
+      locationText,
+      country,
+      countryCode,
+      regions,
+      countries,
+      coverImageUrl,
+      profileImageUrl,
+      profileImageBase64,
+      isPrivate,
+      theme,
+    } = req.body ?? {};
 
     if (typeof name !== 'string' || !name.trim()) {
       res.status(400).json({ success: false, message: 'name is required' });
       return;
     }
+
+    const validScope = ['single', 'multiple', 'global'].includes(locationScope)
+      ? (locationScope as 'single' | 'multiple' | 'global')
+      : undefined;
 
     const club = await communityService.createClub(
       {
@@ -124,7 +144,12 @@ export const createClub = async (req: Request, res: Response, next: NextFunction
         clubId: typeof clubId === 'string' ? clubId.trim() : undefined,
         description: typeof description === 'string' ? description.trim() : '',
         tag: typeof tag === 'string' ? tag.trim() : undefined,
+        locationScope: validScope,
         locationText: typeof locationText === 'string' ? locationText.trim() : undefined,
+        country: typeof country === 'string' ? country.trim() : undefined,
+        countryCode: typeof countryCode === 'string' ? countryCode.trim() : undefined,
+        regions: Array.isArray(regions) ? regions.map((r: any) => String(r).trim()).filter(Boolean) : undefined,
+        countries: Array.isArray(countries) ? countries : undefined,
         coverImageUrl: typeof coverImageUrl === 'string' ? coverImageUrl.trim() : undefined,
         profileImageUrl: typeof profileImageUrl === 'string' ? profileImageUrl.trim() : undefined,
         profileImageBase64: typeof profileImageBase64 === 'string' ? profileImageBase64 : undefined,

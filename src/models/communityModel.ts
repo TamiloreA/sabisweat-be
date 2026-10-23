@@ -111,13 +111,26 @@ export interface CreateCommentResult {
   createdAt: string;
 }
 
+export interface ClubCountry {
+  country: string;
+  countryCode: string;
+  regions: string[];
+}
+
+export type ClubLocationScope = 'single' | 'multiple' | 'global';
+
 export interface ClubDetail {
   id: string;
   clubId?: string;
   name: string;
   description: string;
   tag: string;
+  locationScope: ClubLocationScope;
   locationText: string;
+  country: string | null;
+  countryCode: string | null;
+  regions: string[];
+  countries: ClubCountry[] | null;
   coverImageUrl: string;
   profileImageUrl: string;
   theme: string;
@@ -133,7 +146,12 @@ export interface CreateClubInput {
   clubId?: string;
   description: string;
   tag?: string;
+  locationScope?: ClubLocationScope;
   locationText?: string;
+  country?: string;
+  countryCode?: string;
+  regions?: string[];
+  countries?: ClubCountry[];
   coverImageUrl?: string;
   profileImageUrl?: string;
   profileImageBase64?: string;
