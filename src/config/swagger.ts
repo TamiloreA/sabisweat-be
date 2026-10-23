@@ -70,8 +70,7 @@ const options: swaggerJsdoc.Options = {
             description: { type: 'string', example: 'Complete a 5K run daily for a week hosted by Ekò Runners Club.' },
             rewardText: { type: 'string', example: '500 Sabi Coins' },
             rewardId: { type: 'string', nullable: true, example: 'badge_01' },
-            heroImageUrl: { type: 'string', nullable: true, example: 'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b' },
-            heroImageBase64: { type: 'string', nullable: true, description: 'Base64 data or data URL for hero image' },
+            heroImageBase64: { type: 'string', nullable: true, example: 'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b', description: 'Hero image URL' },
             challengeImage: { type: 'string', nullable: true },
             rules: {
               type: 'array',

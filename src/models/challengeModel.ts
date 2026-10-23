@@ -98,7 +98,6 @@ export interface ChallengeResponse {
   description?: string;
   rewardText: string;
   rewardId?: string | null;
-  heroImageUrl?: string;
   heroImageBase64?: string;
   challengeImage?: string;
   rules?: string[];
