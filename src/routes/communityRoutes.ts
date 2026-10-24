@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { getFeed, createPost, likePost, unlikePost, addComment, getComments, getPostById, createClub, getClubs, getClubById, getClubPosts, voteOnPoll, getCommunityPollResult, createClubEvent, getClubEvents, rsvpClubEvent, requestJoinClub,  getClubJoinRequests,
   resolveJoinRequest,
   getClubMembers,
-  updateClubDescription
+  updateClubDescription,
+  updateClubCoverImage,
+  getClubAnnouncements,
+  createClubAnnouncement
 } from '../controllers/communityController';
 import { getClubChallenges, createChallenge } from '../controllers/challengeController';
 import { requireAuth } from '../middleware/auth';
@@ -428,6 +431,113 @@ router.get('/clubs/:id', requireAuth, getClubById);
  *         description: Successfully updated description
  */
 router.patch('/clubs/:id/description', requireAuth, updateClubDescription);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/cover-image:
+ *   patch:
+ *     summary: Update club cover image (admin only)
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [coverImageBase64]
+ *             properties:
+ *               coverImageBase64:
+ *                 type: string
+ *                 description: Base64-encoded image string with data URI prefix
+ *     responses:
+ *       200:
+ *         description: Club cover image updated
+ *       400:
+ *         description: Invalid image or missing field
+ *       403:
+ *         description: Forbidden - admin or creator only
+ */
+router.patch('/clubs/:id/cover-image', requireAuth, updateClubCoverImage);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/announcements:
+ *   get:
+ *     summary: Fetch club announcements list
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: List of club announcements
+ */
+router.get('/clubs/:id/announcements', requireAuth, getClubAnnouncements);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/announcements:
+ *   post:
+ *     summary: Publish a club announcement (admin only)
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [content]
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 nullable: true
+ *               content:
+ *                 type: string
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Announcement published successfully
+ *       400:
+ *         description: Content is required
+ *       403:
+ *         description: Forbidden - admin or creator only
+ */
+router.post('/clubs/:id/announcements', requireAuth, createClubAnnouncement);
+
 
 /**
  * @openapi

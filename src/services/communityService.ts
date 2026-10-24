@@ -15,6 +15,8 @@ import {
   ClubEvent,
   CommunityPollResult,
   PollResultOption,
+  ClubAnnouncement,
+  CreateAnnouncementInput,
 } from '../models/communityModel';
 
 const POSTS_TABLE = 'community_posts';
@@ -27,6 +29,8 @@ const POLL_OPTIONS_TABLE = 'community_poll_options';
 const POLL_VOTES_TABLE = 'community_poll_votes';
 const CLUB_EVENTS_TABLE = 'club_events';
 const CLUB_EVENT_RSVPS_TABLE = 'club_event_rsvps';
+const CLUB_ANNOUNCEMENTS_TABLE = 'club_announcements';
+const CLUB_ANNOUNCEMENT_READS_TABLE = 'club_announcement_reads';
 const IMAGES_BUCKET = 'community-images';
 
 const DATA_URL_PREFIX = /^data:(image\/[\w+.-]+);base64,/;
@@ -1129,3 +1133,176 @@ export async function resolveJoinRequest(clubId: string, adminUserId: string, ta
     if (insertError) throw insertError;
   }
 }
+
+async function verifyClubAdmin(clubId: string, userId: string): Promise<void> {
+  const { data: member } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (member && member.role === 'admin') {
+    return;
+  }
+
+  const { data: club } = await supabase
+    .from(CLUBS_TABLE)
+    .select('created_by')
+    .eq('id', clubId)
+    .maybeSingle();
+
+  if (club && club.created_by === userId) {
+    return;
+  }
+
+  const err: any = new Error('Forbidden: Only club admins or creators can perform this action');
+  err.status = 403;
+  throw err;
+}
+
+export async function updateClubCoverImage(
+  clubId: string,
+  coverImageBase64: string,
+  userId: string
+): Promise<{ success: boolean; message: string }> {
+  await verifyClubAdmin(clubId, userId);
+
+  const parsed = parseBase64Image(coverImageBase64);
+  if (!parsed) {
+    const err: any = new Error('Invalid image format. Base64 data URI required.');
+    err.status = 400;
+    throw err;
+  }
+
+  const path = `clubs/${clubId}/cover_${randomUUID()}.${parsed.extension}`;
+  const { error: uploadError } = await supabase.storage
+    .from(IMAGES_BUCKET)
+    .upload(path, parsed.buffer, { contentType: parsed.contentType });
+
+  if (uploadError) {
+    throw new Error(`Cover image upload failed: ${uploadError.message}`);
+  }
+
+  const { data: urlData } = supabase.storage.from(IMAGES_BUCKET).getPublicUrl(path);
+  const coverImageUrl = urlData.publicUrl;
+
+  const { error: updateError } = await supabase
+    .from(CLUBS_TABLE)
+    .update({ cover_image_url: coverImageUrl })
+    .eq('id', clubId);
+
+  if (updateError) throw updateError;
+
+  return { success: true, message: 'Club cover image updated' };
+}
+
+export async function createClubAnnouncement(
+  clubId: string,
+  input: CreateAnnouncementInput,
+  userId: string
+): Promise<{ success: boolean; message: string }> {
+  await verifyClubAdmin(clubId, userId);
+
+  const content = input.content?.trim();
+  if (!content) {
+    const err: any = new Error('Announcement content is required');
+    err.status = 400;
+    throw err;
+  }
+
+  const announcementId = randomUUID();
+  const uploadedImages: string[] = [];
+
+  if (input.images && Array.isArray(input.images) && input.images.length > 0) {
+    for (const img of input.images) {
+      const parsed = parseBase64Image(img);
+      if (!parsed) continue;
+
+      const path = `announcements/${announcementId}/${randomUUID()}.${parsed.extension}`;
+      const { error: uploadErr } = await supabase.storage
+        .from(IMAGES_BUCKET)
+        .upload(path, parsed.buffer, { contentType: parsed.contentType });
+
+      if (!uploadErr) {
+        const { data: urlData } = supabase.storage.from(IMAGES_BUCKET).getPublicUrl(path);
+        uploadedImages.push(urlData.publicUrl);
+      }
+    }
+  }
+
+  const primaryImageUrl = uploadedImages.length > 0 ? uploadedImages[0] : null;
+
+  const { error: insertError } = await supabase
+    .from(CLUB_ANNOUNCEMENTS_TABLE)
+    .insert({
+      id: announcementId,
+      club_id: clubId,
+      title: input.title?.trim() || null,
+      content,
+      image_url: primaryImageUrl,
+      images: uploadedImages,
+      created_by: userId,
+    });
+
+  if (insertError) throw insertError;
+
+  // Mark as read for the creating admin
+  try {
+    await supabase.from(CLUB_ANNOUNCEMENT_READS_TABLE).insert({
+      announcement_id: announcementId,
+      user_id: userId,
+    });
+  } catch {
+    // Ignore read mark failure if table does not exist or already read
+  }
+
+  return { success: true, message: 'Announcement published successfully' };
+}
+
+export async function getClubAnnouncements(
+  clubId: string,
+  userId: string,
+  page: number = 1,
+  size: number = 20
+): Promise<ClubAnnouncement[]> {
+  const from = (page - 1) * size;
+  const to = from + size - 1;
+
+  const { data: announcements, error } = await supabase
+    .from(CLUB_ANNOUNCEMENTS_TABLE)
+    .select('id, club_id, title, content, image_url, images, created_at')
+    .eq('club_id', clubId)
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+
+  if (!announcements || announcements.length === 0) {
+    return [];
+  }
+
+  const announcementIds = announcements.map((a: any) => a.id);
+
+  const { data: readRecords } = await supabase
+    .from(CLUB_ANNOUNCEMENT_READS_TABLE)
+    .select('announcement_id')
+    .eq('user_id', userId)
+    .in('announcement_id', announcementIds);
+
+  const readSet = new Set((readRecords ?? []).map((r: any) => r.announcement_id));
+
+  return announcements.map((a: any) => ({
+    id: a.id,
+    clubId: a.club_id,
+    title: a.title ?? null,
+    content: a.content,
+    imageUrl: a.image_url ?? (Array.isArray(a.images) && a.images.length > 0 ? a.images[0] : null),
+    isRead: readSet.has(a.id),
+    createdAt: a.created_at,
+  }));
+}
+

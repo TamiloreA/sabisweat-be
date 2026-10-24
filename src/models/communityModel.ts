@@ -180,3 +180,24 @@ export interface ClubEvent {
   rsvpedByMe: boolean;
   createdAt: string;
 }
+
+export interface ClubAnnouncement {
+  id: string;
+  clubId: string;
+  title: string | null;
+  content: string;
+  imageUrl: string | null;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface CreateAnnouncementInput {
+  title?: string | null;
+  content: string;
+  images?: string[];
+}
+
+export interface UpdateClubCoverImageInput {
+  coverImageBase64: string;
+}
+

@@ -338,3 +338,64 @@ export const getClubMembers = async (req: Request, res: Response, next: NextFunc
     next(error);
   }
 };
+
+export const updateClubCoverImage = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { coverImageBase64 } = req.body ?? {};
+    if (typeof coverImageBase64 !== 'string' || !coverImageBase64.trim()) {
+      res.status(400).json({ success: false, message: 'coverImageBase64 is required' });
+      return;
+    }
+
+    const result = await communityService.updateClubCoverImage(
+      req.params.id,
+      coverImageBase64.trim(),
+      req.user!.id
+    );
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getClubAnnouncements = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const size = Math.min(100, Math.max(1, Number(req.query.size) || 20));
+
+    const announcements = await communityService.getClubAnnouncements(
+      req.params.id,
+      req.user!.id,
+      page,
+      size
+    );
+    res.status(200).json({ success: true, data: announcements });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createClubAnnouncement = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { title, content, images } = req.body ?? {};
+    if (typeof content !== 'string' || !content.trim()) {
+      res.status(400).json({ success: false, message: 'content is required' });
+      return;
+    }
+
+    const result = await communityService.createClubAnnouncement(
+      req.params.id,
+      {
+        title: typeof title === 'string' && title.trim() ? title.trim() : undefined,
+        content: content.trim(),
+        images: Array.isArray(images) ? images : undefined,
+      },
+      req.user!.id
+    );
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
