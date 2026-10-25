@@ -1056,16 +1056,7 @@ export async function requestJoinClub(clubId: string, userId: string): Promise<v
 
 export async function getClubJoinRequests(clubId: string, adminUserId: string) {
   // Check if admin
-  const { data: membership } = await supabase
-    .from(CLUB_MEMBERS_TABLE)
-    .select('role')
-    .eq('club_id', clubId)
-    .eq('user_id', adminUserId)
-    .single();
-
-  if (!membership || membership.role !== 'admin') {
-    throw new Error('Forbidden: Not an admin');
-  }
+  await verifyClubAdmin(clubId, adminUserId);
 
   const { data: requests, error } = await supabase
     .from('club_join_requests')
@@ -1079,7 +1070,9 @@ export async function getClubJoinRequests(clubId: string, adminUserId: string) {
         last_name,
         username,
         photo_url,
-        avatar_id
+        avatar_id,
+        region,
+        country
       )
     `)
     .eq('club_id', clubId)
@@ -1099,22 +1092,16 @@ export async function getClubJoinRequests(clubId: string, adminUserId: string) {
       photoUrl: req.profiles.photo_url,
       avatarId: req.profiles.avatar_id,
       displayName: [req.profiles.first_name, req.profiles.last_name].filter(Boolean).join(' ') || undefined,
+      region: req.profiles.region ?? null,
+      country: req.profiles.country ?? null,
+      location: [req.profiles.region, req.profiles.country].filter(Boolean).join(', ') || null,
     } : null,
   }));
 }
 
 export async function resolveJoinRequest(clubId: string, adminUserId: string, targetUserId: string, status: 'approved' | 'rejected') {
   // Check if admin
-  const { data: membership } = await supabase
-    .from(CLUB_MEMBERS_TABLE)
-    .select('role')
-    .eq('club_id', clubId)
-    .eq('user_id', adminUserId)
-    .single();
-
-  if (!membership || membership.role !== 'admin') {
-    throw new Error('Forbidden: Not an admin');
-  }
+  await verifyClubAdmin(clubId, adminUserId);
 
   const { error: updateError } = await supabase
     .from('club_join_requests')
@@ -1128,13 +1115,71 @@ export async function resolveJoinRequest(clubId: string, adminUserId: string, ta
   if (status === 'approved') {
     const { error: insertError } = await supabase
       .from(CLUB_MEMBERS_TABLE)
-      .insert({
+      .upsert({
         club_id: clubId,
         user_id: targetUserId,
         role: 'member',
-      });
+      }, { onConflict: 'club_id,user_id', ignoreDuplicates: true });
     if (insertError) throw insertError;
   }
+}
+
+export async function resolveBulkJoinRequests(
+  clubId: string,
+  adminUserId: string,
+  status: 'approved' | 'rejected',
+  userIds?: string[]
+): Promise<{ success: boolean; message: string; count: number }> {
+  await verifyClubAdmin(clubId, adminUserId);
+
+  let query = supabase
+    .from('club_join_requests')
+    .select('user_id')
+    .eq('club_id', clubId)
+    .eq('status', 'pending');
+
+  if (Array.isArray(userIds) && userIds.length > 0) {
+    query = query.in('user_id', userIds);
+  }
+
+  const { data: pendingRequests, error: fetchError } = await query;
+  if (fetchError) throw fetchError;
+
+  if (!pendingRequests || pendingRequests.length === 0) {
+    return { success: true, message: 'No pending requests to resolve', count: 0 };
+  }
+
+  const targetUserIds = pendingRequests.map((r: any) => r.user_id);
+
+  const { error: updateError } = await supabase
+    .from('club_join_requests')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('club_id', clubId)
+    .in('user_id', targetUserIds)
+    .eq('status', 'pending');
+
+  if (updateError) throw updateError;
+
+  if (status === 'approved') {
+    const memberRows = targetUserIds.map((uid) => ({
+      club_id: clubId,
+      user_id: uid,
+      role: 'member' as const,
+    }));
+
+    const { error: insertError } = await supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .upsert(memberRows, { onConflict: 'club_id,user_id', ignoreDuplicates: true });
+
+    if (insertError) throw insertError;
+  }
+
+  const actionText = status === 'approved' ? 'approved' : 'rejected';
+  return {
+    success: true,
+    message: `Successfully ${actionText} ${targetUserIds.length} join request(s)`,
+    count: targetUserIds.length,
+  };
 }
 
 async function verifyClubAdmin(clubId: string, userId: string): Promise<void> {

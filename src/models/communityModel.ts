@@ -226,4 +226,30 @@ export interface ClubReport {
   createdAt: string;
 }
 
+export interface ClubJoinRequestUser {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  username?: string | null;
+  photoUrl?: string | null;
+  avatarId?: string | null;
+  displayName?: string | null;
+  region?: string | null;
+  country?: string | null;
+  location?: string | null;
+}
+
+export interface ClubJoinRequestItem {
+  userId: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  user: ClubJoinRequestUser | null;
+}
+
+export interface ResolveBulkJoinRequestsInput {
+  status: 'approved' | 'rejected';
+  userIds?: string[];
+}
+
+
 

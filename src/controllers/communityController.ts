@@ -314,6 +314,42 @@ export const resolveJoinRequest = async (req: Request, res: Response, next: Next
   }
 };
 
+export const resolveBulkJoinRequests = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    let status = req.body?.status || req.body?.action;
+    if (!status) {
+      if (req.path.includes('reject') || req.path.includes('deny')) {
+        status = 'rejected';
+      } else if (req.path.includes('approve')) {
+        status = 'approved';
+      }
+    }
+
+    if (status !== 'approved' && status !== 'rejected') {
+      res.status(400).json({ success: false, message: 'status must be "approved" or "rejected"' });
+      return;
+    }
+
+    const userIds = req.body?.userIds || req.body?.users;
+    if (userIds !== undefined && !Array.isArray(userIds)) {
+      res.status(400).json({ success: false, message: 'userIds must be an array of user IDs' });
+      return;
+    }
+
+    const result = await communityService.resolveBulkJoinRequests(
+      req.params.id,
+      req.user!.id,
+      status,
+      userIds
+    );
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+
 export const updateClubDescription = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { description } = req.body;

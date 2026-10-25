@@ -7,7 +7,8 @@ import { getFeed, createPost, likePost, unlikePost, addComment, getComments, get
   getClubAnnouncements,
   createClubAnnouncement,
   reportClub,
-  getMyPosts
+  getMyPosts,
+  resolveBulkJoinRequests
 } from '../controllers/communityController';
 import { getClubChallenges, createChallenge } from '../controllers/challengeController';
 import { requireAuth } from '../middleware/auth';
@@ -958,9 +959,49 @@ router.post('/clubs/:id/join', requireAuth, requestJoinClub);
  *           type: string
  *     responses:
  *       200:
- *         description: List of pending join requests
+ *         description: List of pending join requests including user profile, region, and country
  */
 router.get('/clubs/:id/requests', requireAuth, getClubJoinRequests);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/requests/bulk:
+ *   post:
+ *     summary: Bulk approve or reject join requests (admin only)
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [approved, rejected]
+ *               userIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Optional list of user IDs to resolve. If omitted, all pending requests are resolved.
+ *     responses:
+ *       200:
+ *         description: Requests resolved successfully
+ */
+router.post('/clubs/:id/requests/bulk', requireAuth, resolveBulkJoinRequests);
+router.post('/clubs/:id/requests/resolve', requireAuth, resolveBulkJoinRequests);
+router.post('/clubs/:id/requests/bulk-reject', requireAuth, resolveBulkJoinRequests);
+router.post('/clubs/:id/requests/bulk-approve', requireAuth, resolveBulkJoinRequests);
+
 
 /**
  * @openapi
