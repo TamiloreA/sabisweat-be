@@ -423,4 +423,23 @@ export const reportClub = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+export const getMyPosts = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const size = Math.min(100, Math.max(1, Number(req.query.size) || 10));
+
+    const result = await communityService.getMyPosts(req.user!.id, page, size);
+    res.status(200).json({
+      success: true,
+      data: result.data,
+      page: result.page,
+      size: result.size,
+      total: result.total,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
 

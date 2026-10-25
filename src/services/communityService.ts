@@ -18,6 +18,7 @@ import {
   ClubAnnouncement,
   CreateAnnouncementInput,
   ReportClubInput,
+  MyPostsResult,
 } from '../models/communityModel';
 
 const POSTS_TABLE = 'community_posts';
@@ -1355,5 +1356,117 @@ export async function reportClub(
 
   return { success: true, message: 'Report submitted successfully' };
 }
+
+export async function getMyPosts(
+  userId: string,
+  page: number = 1,
+  size: number = 10
+): Promise<MyPostsResult> {
+  const from = (page - 1) * size;
+  const to = from + size - 1;
+
+  const { data: posts, count, error } = await supabase
+    .from(POSTS_TABLE)
+    .select('*', { count: 'exact' })
+    .eq('author_id', userId)
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (error) throw error;
+  if (!posts?.length) {
+    return { data: [], page, size, total: count ?? 0 };
+  }
+
+  const postIds = posts.map((post) => post.id);
+
+  const [profileMap, likesRes, commentsRes, pollOptionsRes, pollVotesRes] = await Promise.all([
+    fetchProfilesMap([userId]),
+    supabase.from(LIKES_TABLE).select('post_id, user_id').in('post_id', postIds),
+    supabase.from(COMMENTS_TABLE).select('post_id').in('post_id', postIds),
+    supabase.from(POLL_OPTIONS_TABLE).select('*').in('post_id', postIds),
+    supabase.from(POLL_VOTES_TABLE).select('option_id').eq('user_id', userId),
+  ]);
+
+  const likeCounts = new Map<string, number>();
+  const likedPostIds = new Set<string>();
+  for (const like of likesRes.data ?? []) {
+    likeCounts.set(like.post_id, (likeCounts.get(like.post_id) ?? 0) + 1);
+    if (like.user_id === userId) likedPostIds.add(like.post_id);
+  }
+
+  const commentCounts = new Map<string, number>();
+  for (const comment of commentsRes.data ?? []) {
+    commentCounts.set(comment.post_id, (commentCounts.get(comment.post_id) ?? 0) + 1);
+  }
+
+  const myVotedOptionIds = new Set((pollVotesRes.data ?? []).map((v) => v.option_id));
+
+  const optionIds = (pollOptionsRes.data ?? []).map((o) => o.id);
+  let allVotesData: any[] = [];
+  if (optionIds.length > 0) {
+    const { data } = await supabase.from(POLL_VOTES_TABLE).select('option_id').in('option_id', optionIds);
+    allVotesData = data ?? [];
+  }
+  const voteCounts = new Map<string, number>();
+  for (const v of allVotesData) {
+    voteCounts.set(v.option_id, (voteCounts.get(v.option_id) ?? 0) + 1);
+  }
+
+  const authorProfile = profileMap.get(userId);
+  const displayName = authorProfile
+    ? [authorProfile.first_name, authorProfile.last_name].filter(Boolean).join(' ') || null
+    : null;
+  const author = {
+    id: userId,
+    username: authorProfile?.username ?? null,
+    displayName,
+    photoUrl: authorProfile?.photo_url || authorProfile?.photo_base64 || null,
+    avatarId: authorProfile?.avatar_id ?? null,
+  };
+
+  const data: FeedPost[] = posts.map((post: any) => {
+    const postOptions = (pollOptionsRes.data ?? []).filter((o) => o.post_id === post.id);
+    let pollOptions = null;
+    if (postOptions.length > 0) {
+      const totalVotes = postOptions.reduce((acc, o) => acc + (voteCounts.get(o.id) ?? 0), 0);
+      pollOptions = postOptions.map((o) => {
+        const votesCount = voteCounts.get(o.id) ?? 0;
+        return {
+          id: o.id,
+          text: o.text,
+          votesCount,
+          percent: totalVotes > 0 ? Math.round((votesCount / totalVotes) * 100) : 0,
+          votedByMe: myVotedOptionIds.has(o.id),
+        };
+      });
+    }
+
+    return {
+      id: post.id,
+      title: post.title,
+      description: post.description,
+      tag: post.tag,
+      imagesUrl: post.images_url ?? [],
+      counts: {
+        likes: likeCounts.get(post.id) ?? 0,
+        comments: commentCounts.get(post.id) ?? 0,
+        shares: 0,
+      },
+      likedByMe: likedPostIds.has(post.id),
+      author,
+      clubId: post.club_id ?? null,
+      createdAt: post.created_at,
+      pollOptions,
+    };
+  });
+
+  return {
+    data,
+    page,
+    size,
+    total: count ?? 0,
+  };
+}
+
 
 

@@ -6,7 +6,8 @@ import { getFeed, createPost, likePost, unlikePost, addComment, getComments, get
   updateClubCoverImage,
   getClubAnnouncements,
   createClubAnnouncement,
-  reportClub
+  reportClub,
+  getMyPosts
 } from '../controllers/communityController';
 import { getClubChallenges, createChallenge } from '../controllers/challengeController';
 import { requireAuth } from '../middleware/auth';
@@ -205,6 +206,32 @@ router.post('/posts/:id/comments', requireAuth, addComment);
  *         description: List of top-level comments, each with a children array
  */
 router.get('/posts/:id/comments', requireAuth, getComments);
+
+/**
+ * @openapi
+ * /community/posts/me:
+ *   get:
+ *     summary: Fetch my posts list
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *     responses:
+ *       200:
+ *         description: Paginated list of my posts
+ */
+router.get('/posts/me', requireAuth, getMyPosts);
+
 
 /**
  * @openapi

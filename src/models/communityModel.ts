@@ -1,9 +1,9 @@
 export interface PostAuthor {
   id: string;
-  username?: string;
-  displayName?: string;
-  photoUrl?: string;
-  avatarId?: string;
+  username?: string | null;
+  displayName?: string | null;
+  photoUrl?: string | null;
+  avatarId?: string | null;
 }
 
 export interface PostCounts {
@@ -53,7 +53,7 @@ export interface FeedPost {
   likedByMe: boolean;
   author: PostAuthor;
   clubId: string | null;
-  pollOptions?: PollOption[];
+  pollOptions?: PollOption[] | null;
   createdAt: string;
 }
 
@@ -62,6 +62,14 @@ export interface FeedResult {
   page: number;
   size: number;
 }
+
+export interface MyPostsResult {
+  data: FeedPost[];
+  page: number;
+  size: number;
+  total: number;
+}
+
 
 export interface CreatePostInput {
   title: string;
