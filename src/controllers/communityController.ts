@@ -399,3 +399,28 @@ export const createClubAnnouncement = async (req: Request, res: Response, next: 
   }
 };
 
+export const reportClub = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { reason, reportedSections, details } = req.body ?? {};
+    if (typeof reason !== 'string' || !reason.trim()) {
+      res.status(400).json({ success: false, message: 'reason is required' });
+      return;
+    }
+
+    const result = await communityService.reportClub(
+      req.params.id,
+      {
+        reason: reason.trim(),
+        reportedSections: Array.isArray(reportedSections) ? reportedSections : undefined,
+        details: typeof details === 'string' ? details.trim() : undefined,
+      },
+      req.user!.id
+    );
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+

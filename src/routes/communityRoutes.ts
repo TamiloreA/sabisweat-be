@@ -5,7 +5,8 @@ import { getFeed, createPost, likePost, unlikePost, addComment, getComments, get
   updateClubDescription,
   updateClubCoverImage,
   getClubAnnouncements,
-  createClubAnnouncement
+  createClubAnnouncement,
+  reportClub
 } from '../controllers/communityController';
 import { getClubChallenges, createChallenge } from '../controllers/challengeController';
 import { requireAuth } from '../middleware/auth';
@@ -537,6 +538,50 @@ router.get('/clubs/:id/announcements', requireAuth, getClubAnnouncements);
  *         description: Forbidden - admin or creator only
  */
 router.post('/clubs/:id/announcements', requireAuth, createClubAnnouncement);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/report:
+ *   post:
+ *     summary: Report a club
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reason]
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 example: spam_scams_promotions
+ *               reportedSections:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["club_name", "club_description", "club_cover_image"]
+ *               details:
+ *                 type: string
+ *                 example: User is advertising unauthorized commercial products and spamming links.
+ *     responses:
+ *       200:
+ *         description: Report submitted successfully
+ *       400:
+ *         description: Missing required fields
+ *       404:
+ *         description: Club not found
+ */
+router.post('/clubs/:id/report', requireAuth, reportClub);
+
 
 
 /**

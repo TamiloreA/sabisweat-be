@@ -17,6 +17,7 @@ import {
   PollResultOption,
   ClubAnnouncement,
   CreateAnnouncementInput,
+  ReportClubInput,
 } from '../models/communityModel';
 
 const POSTS_TABLE = 'community_posts';
@@ -31,6 +32,7 @@ const CLUB_EVENTS_TABLE = 'club_events';
 const CLUB_EVENT_RSVPS_TABLE = 'club_event_rsvps';
 const CLUB_ANNOUNCEMENTS_TABLE = 'club_announcements';
 const CLUB_ANNOUNCEMENT_READS_TABLE = 'club_announcement_reads';
+const CLUB_REPORTS_TABLE = 'club_reports';
 const IMAGES_BUCKET = 'community-images';
 
 const DATA_URL_PREFIX = /^data:(image\/[\w+.-]+);base64,/;
@@ -1305,4 +1307,53 @@ export async function getClubAnnouncements(
     createdAt: a.created_at,
   }));
 }
+
+export async function reportClub(
+  clubId: string,
+  input: ReportClubInput,
+  reporterId: string
+): Promise<{ success: boolean; message: string }> {
+  const { data: club, error: clubError } = await supabase
+    .from(CLUBS_TABLE)
+    .select('id')
+    .eq('id', clubId)
+    .maybeSingle();
+
+  if (clubError) throw clubError;
+  if (!club) {
+    const err: any = new Error('Club not found');
+    err.status = 404;
+    throw err;
+  }
+
+  const reason = input.reason?.trim();
+  if (!reason) {
+    const err: any = new Error('reason is required');
+    err.status = 400;
+    throw err;
+  }
+
+  const reportedSections = Array.isArray(input.reportedSections)
+    ? input.reportedSections.map((s: any) => String(s).trim()).filter(Boolean)
+    : [];
+
+  const details = typeof input.details === 'string' && input.details.trim()
+    ? input.details.trim()
+    : null;
+
+  const { error: insertError } = await supabase
+    .from(CLUB_REPORTS_TABLE)
+    .insert({
+      club_id: clubId,
+      reporter_id: reporterId,
+      reason,
+      reported_sections: reportedSections,
+      details,
+    });
+
+  if (insertError) throw insertError;
+
+  return { success: true, message: 'Report submitted successfully' };
+}
+
 

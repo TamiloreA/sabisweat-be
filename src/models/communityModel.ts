@@ -201,3 +201,21 @@ export interface UpdateClubCoverImageInput {
   coverImageBase64: string;
 }
 
+export interface ReportClubInput {
+  reason: string;
+  reportedSections?: string[];
+  details?: string;
+}
+
+export interface ClubReport {
+  id: string;
+  clubId: string;
+  reporterId: string;
+  reason: string;
+  reportedSections: string[];
+  details: string | null;
+  status: string;
+  createdAt: string;
+}
+
+
