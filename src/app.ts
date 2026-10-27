@@ -38,6 +38,7 @@ setupSwagger(app);
 app.use('/api/v1/examples', exampleRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/onboarding', onboardingRoutes);
+app.use('/health', healthRoutes);
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/home', homeRoutes);
 app.use('/api/v1/points', pointsRoutes);

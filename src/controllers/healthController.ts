@@ -35,12 +35,24 @@ export const syncStepDataBatch = async (req: AuthenticatedRequest, res: Response
       return;
     }
 
-    if (!Array.isArray(req.body)) {
-      res.status(400).json({ success: false, error: 'validation_error', message: 'Expected an array of sync payloads' });
+    const payloads = Array.isArray(req.body)
+      ? req.body
+      : Array.isArray(req.body?.records)
+      ? req.body.records
+      : null;
+
+    if (!payloads) {
+      res.status(400).json({
+        success: false,
+        error: 'validation_error',
+        message: 'Expected an array of sync payloads or an object with records array'
+      });
       return;
     }
 
-    const result = await healthService.syncStepDataBatch(req.user.id, req.body, req.token!);
+    const platform = typeof req.body?.platform === 'string' ? req.body.platform : undefined;
+
+    const result = await healthService.syncStepDataBatch(req.user.id, payloads, req.token!, platform);
     res.status(200).json({ success: true, ...result });
   } catch (error: any) {
     if (error.status) {
@@ -150,3 +162,46 @@ export const getTodaySteps = async (req: AuthenticatedRequest, res: Response, ne
     next(error);
   }
 };
+
+/**
+ * GET /health/reports/weekly
+ * Get weekly performance report
+ */
+export const getWeeklyReport = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user?.id) {
+      res.status(401).json({ status: 'error', success: false, error: 'unauthorized', message: 'Not authenticated' });
+      return;
+    }
+
+    const weekStartDate = typeof req.query.weekStartDate === 'string' ? req.query.weekStartDate.trim() : '';
+    if (!weekStartDate) {
+      res.status(400).json({
+        status: 'error',
+        success: false,
+        error: 'validation_error',
+        message: 'weekStartDate query parameter is required (YYYY-MM-DD)'
+      });
+      return;
+    }
+
+    const timezone = typeof req.query.timezone === 'string' && req.query.timezone.trim()
+      ? req.query.timezone.trim()
+      : 'Africa/Lagos';
+
+    const data = await healthService.getWeeklyReport(req.user.id, weekStartDate, timezone);
+    res.status(200).json({ status: 'success', success: true, data });
+  } catch (error: any) {
+    if (error.status) {
+      res.status(error.status).json({
+        status: 'error',
+        success: false,
+        error: error.error || 'error',
+        message: error.message
+      });
+      return;
+    }
+    next(error);
+  }
+};
+

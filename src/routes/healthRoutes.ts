@@ -12,5 +12,6 @@ router.get('/history', healthController.getHealthHistory);
 router.get('/history/all', healthController.getHealthHistoryAll);
 router.patch('/step-goal', healthController.updateStepGoal);
 router.get('/today', healthController.getTodaySteps);
+router.get('/reports/weekly', healthController.getWeeklyReport);
 
 export default router;
