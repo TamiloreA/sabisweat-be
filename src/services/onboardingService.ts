@@ -197,17 +197,25 @@ export async function completeOnboarding(userId: string, data: {
  * Update profile fields (post-onboarding edits)
  */
 export async function updateProfile(userId: string, data: {
-  firstName?: string;
-  lastName?: string;
-  city?: string;
-  bio?: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  city?: string | null;
+  bio?: string | null;
+  region?: string | null;
+  country?: string | null;
+  avatarId?: string | null;
+  photoBase64?: string | null;
 }, token: string) {
   const updateData: Record<string, any> = {};
 
-  if (data.firstName !== undefined) updateData.first_name = data.firstName.trim();
-  if (data.lastName !== undefined) updateData.last_name = data.lastName.trim();
-  if (data.city !== undefined) updateData.city = data.city.trim();
-  if (data.bio !== undefined) updateData.bio = data.bio.trim();
+  if (data.firstName !== undefined) updateData.first_name = data.firstName !== null ? String(data.firstName).trim() : null;
+  if (data.lastName !== undefined) updateData.last_name = data.lastName !== null ? String(data.lastName).trim() : null;
+  if (data.city !== undefined) updateData.city = data.city !== null ? String(data.city).trim() : null;
+  if (data.bio !== undefined) updateData.bio = data.bio !== null ? String(data.bio).trim() : null;
+  if (data.region !== undefined) updateData.region = data.region !== null ? String(data.region).trim() : null;
+  if (data.country !== undefined) updateData.country = data.country !== null ? String(data.country).trim() : null;
+  if (data.avatarId !== undefined) updateData.avatar_id = data.avatarId !== null ? String(data.avatarId).trim() : null;
+  if (data.photoBase64 !== undefined) updateData.photo_base64 = data.photoBase64 !== null ? String(data.photoBase64) : null;
 
   if (Object.keys(updateData).length === 0) {
     throw { status: 400, error: 'validation_error', message: 'At least one field must be provided' };

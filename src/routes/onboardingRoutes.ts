@@ -127,10 +127,20 @@ router.post('/complete', completeOnboarding);
  *                 type: string
  *               lastName:
  *                 type: string
+ *               region:
+ *                 type: string
+ *               country:
+ *                 type: string
  *               city:
  *                 type: string
  *               bio:
  *                 type: string
+ *               avatarId:
+ *                 type: string
+ *                 nullable: true
+ *               photoBase64:
+ *                 type: string
+ *                 nullable: true
  *     responses:
  *       200:
  *         description: Profile updated

@@ -73,17 +73,27 @@ export interface SetIdentityResponse extends OnboardingProfile {
 }
 
 export interface UpdateProfileRequest {
-  firstName?: string;
-  lastName?: string;
-  city?: string;
-  bio?: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  city?: string | null;
+  bio?: string | null;
+  region?: string | null;
+  country?: string | null;
+  avatarId?: string | null;
+  photoBase64?: string | null;
 }
 
 export interface UpdateProfileResponse extends OnboardingProfile {
-  firstName?: string;
-  lastName?: string;
-  city?: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+  bio?: string | null;
+  avatarId?: string | null;
+  photoBase64?: string | null;
 }
+
 
 /**
  * Database row shape (snake_case from Supabase)
