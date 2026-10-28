@@ -14,6 +14,7 @@ import communityRoutes from './routes/communityRoutes';
 import newsRoutes from './routes/newsRoutes';
 import streaksRoutes from './routes/streaksRoutes';
 import challengeRoutes from './routes/challengeRoutes';
+import versionRoutes from './routes/versionRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { apiRateLimiter } from './middleware/rateLimiter';
 
@@ -60,6 +61,10 @@ app.use('/api/v1/streaks', streaksRoutes);
 // Challenges — also at root to match the mobile app's existing paths
 app.use('/challenges', challengeRoutes);
 app.use('/api/v1/challenges', challengeRoutes);
+
+// App Version — public endpoint mounted both at root and /api/v1
+app.use('/app-version', versionRoutes);
+app.use('/api/v1/app-version', versionRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'SabiSweat API is running' });
