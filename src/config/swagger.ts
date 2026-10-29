@@ -147,6 +147,87 @@ const options: swaggerJsdoc.Options = {
             createdAt: { type: 'string', format: 'date-time' },
           },
         },
+        WeeklyReportReportingPeriod: {
+          type: 'object',
+          properties: {
+            weekStartDate: { type: 'string', example: '2026-10-18' },
+            weekEndDate: { type: 'string', example: '2026-10-24' },
+            isCurrentWeek: { type: 'boolean', example: false },
+            daysElapsed: { type: 'integer', example: 7 },
+          },
+        },
+        WeeklyReportSummary: {
+          type: 'object',
+          properties: {
+            totalSteps: { type: 'integer', example: 68420 },
+            totalDistanceKm: { type: 'number', example: 48.2 },
+            totalActiveCalories: { type: 'number', example: 2450 },
+            dailyGoalSteps: { type: 'integer', example: 8000 },
+            daysGoalAchieved: { type: 'integer', example: 5 },
+          },
+        },
+        WeeklyReportComparison: {
+          type: 'object',
+          properties: {
+            stepsChangePercent: { type: 'number', example: 12.5 },
+            distanceChangePercent: { type: 'number', example: 8.3 },
+            caloriesChangePercent: { type: 'number', example: 15.0 },
+            hasPriorWeekBaseline: { type: 'boolean', example: true },
+          },
+        },
+        WeeklyReportCommunityRank: {
+          type: 'object',
+          properties: {
+            topPercentage: { type: 'integer', nullable: true, example: 28 },
+            totalEligibleUsers: { type: 'integer', example: 142 },
+          },
+        },
+        WeeklyReportDailyBreakdown: {
+          type: 'object',
+          properties: {
+            date: { type: 'string', example: '2026-10-18' },
+            dayOfWeek: { type: 'string', example: 'Sun' },
+            steps: { type: 'integer', example: 9200 },
+            distanceKm: { type: 'number', example: 6.5 },
+            activeCalories: { type: 'number', example: 340 },
+            isGoalMet: { type: 'boolean', example: true },
+          },
+        },
+        WeeklyReportHighlights: {
+          type: 'object',
+          properties: {
+            bestDay: {
+              type: 'object',
+              properties: {
+                date: { type: 'string', example: '2026-10-20' },
+                dayOfWeek: { type: 'string', example: 'Tue' },
+                steps: { type: 'integer', example: 12400 },
+              },
+            },
+            dailyAverageSteps: { type: 'integer', example: 9774 },
+          },
+        },
+        WeeklyReportResponse: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', example: 'success' },
+            success: { type: 'boolean', example: true },
+            data: {
+              type: 'object',
+              properties: {
+                reportingPeriod: { $ref: '#/components/schemas/WeeklyReportReportingPeriod' },
+                summary: { $ref: '#/components/schemas/WeeklyReportSummary' },
+                comparison: { $ref: '#/components/schemas/WeeklyReportComparison' },
+                communityRank: { $ref: '#/components/schemas/WeeklyReportCommunityRank' },
+                dailyBreakdown: {
+                  type: 'array',
+                  items: { $ref: '#/components/schemas/WeeklyReportDailyBreakdown' },
+                },
+                highlights: { $ref: '#/components/schemas/WeeklyReportHighlights' },
+              },
+            },
+          },
+        },
       },
     },
   },
