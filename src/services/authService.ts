@@ -20,6 +20,7 @@ import type {
   SabiLevel,
 } from '../models/authModel';
 import type { ProfileRow } from '../models/onboardingModel';
+import { normalizeGender } from '../utils/genderUtils';
 
 /**
  * Generate an 8-char alphanumeric referral code
@@ -51,7 +52,7 @@ function mapProfileToAuthUser(row: ProfileRow): AuthUser {
     onboardingStatus: row.onboarding_status as OnboardingStatus,
     city: row.city,
     referralCode: row.referral_code,
-    gender: row.gender,
+    gender: normalizeGender(row.gender) || row.gender,
     dob: row.date_of_birth,
     sabiLevel: row.sabi_level as SabiLevel | null,
     level: row.sabi_level as SabiLevel | null,

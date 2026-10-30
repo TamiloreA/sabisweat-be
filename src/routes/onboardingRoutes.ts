@@ -77,7 +77,8 @@ router.get('/check-username/:username', checkUsername);
  *                 format: date
  *               gender:
  *                 type: string
- *                 enum: [Man, Woman, Others]
+ *                 enum: [Female, Male, Non-binary, Prefer not to say]
+ *                 example: Female
  *               referralCode:
  *                 type: string
  *               mainGoal:
@@ -127,6 +128,10 @@ router.post('/complete', completeOnboarding);
  *                 type: string
  *               lastName:
  *                 type: string
+ *               gender:
+ *                 type: string
+ *                 enum: [Female, Male, Non-binary, Prefer not to say]
+ *                 example: Female
  *               region:
  *                 type: string
  *               country:

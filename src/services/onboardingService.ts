@@ -6,6 +6,7 @@
 import { getUserSupabase, supabase } from '../config/database';
 import type { ProfileRow } from '../models/onboardingModel';
 import type { OnboardingStatus } from '../models/authModel';
+import { normalizeGender } from '../utils/genderUtils';
 
 /**
  * Map a profile row → onboarding profile response
@@ -18,7 +19,7 @@ function mapToOnboardingProfile(row: ProfileRow) {
     lastName: row.last_name,
     username: row.username,
     dateOfBirth: row.date_of_birth,
-    gender: row.gender,
+    gender: normalizeGender(row.gender) || row.gender,
     movementRelationship: row.movement_relationship,
     mainGoal: row.main_goal,
     walkingFrequency: row.walking_frequency,
@@ -97,9 +98,9 @@ export async function completeOnboarding(userId: string, data: {
     throw { status: 400, error: 'validation_error', message: 'firstName, lastName, dob, and gender are required' };
   }
 
-  const validGenders = ['Man', 'Woman', 'Others'];
-  if (!validGenders.includes(data.gender)) {
-    throw { status: 400, error: 'validation_error', message: 'Gender must be Man, Woman, or Others' };
+  const normalizedGender = normalizeGender(data.gender);
+  if (!normalizedGender) {
+    throw { status: 400, error: 'validation_error', message: 'Gender must be Female, Male, Non-binary, or Prefer not to say' };
   }
 
   if (!data.mainGoal || !data.walkingFrequency || !data.startingGoal) {
@@ -144,7 +145,7 @@ export async function completeOnboarding(userId: string, data: {
     last_name: data.lastName.trim(),
     email: data.email,
     date_of_birth: data.dob,
-    gender: data.gender,
+    gender: normalizedGender,
     // Goals
     main_goal: data.mainGoal,
     walking_frequency: data.walkingFrequency,
@@ -205,6 +206,7 @@ export async function updateProfile(userId: string, data: {
   country?: string | null;
   avatarId?: string | null;
   photoBase64?: string | null;
+  gender?: string | null;
 }, token: string) {
   const updateData: Record<string, any> = {};
 
@@ -216,6 +218,17 @@ export async function updateProfile(userId: string, data: {
   if (data.country !== undefined) updateData.country = data.country !== null ? String(data.country).trim() : null;
   if (data.avatarId !== undefined) updateData.avatar_id = data.avatarId !== null ? String(data.avatarId).trim() : null;
   if (data.photoBase64 !== undefined) updateData.photo_base64 = data.photoBase64 !== null ? String(data.photoBase64) : null;
+  if (data.gender !== undefined) {
+    if (data.gender === null) {
+      updateData.gender = null;
+    } else {
+      const normalizedGender = normalizeGender(data.gender);
+      if (!normalizedGender) {
+        throw { status: 400, error: 'validation_error', message: 'Gender must be Female, Male, Non-binary, or Prefer not to say' };
+      }
+      updateData.gender = normalizedGender;
+    }
+  }
 
   if (Object.keys(updateData).length === 0) {
     throw { status: 400, error: 'validation_error', message: 'At least one field must be provided' };

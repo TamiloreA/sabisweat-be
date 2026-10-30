@@ -3,8 +3,17 @@
  */
 
 import type { OnboardingStatus } from './authModel';
+import type { StandardGender } from '../utils/genderUtils';
 
-export type Gender = 'Man' | 'Woman' | 'Others';
+export type Gender =
+  | StandardGender
+  | 'Female'
+  | 'Male'
+  | 'Non-binary'
+  | 'Prefer not to say'
+  | 'Man'
+  | 'Woman'
+  | 'Others';
 
 export type MainGoal =
   | 'Build Consistency'
