@@ -146,6 +146,38 @@ router.post('/sync/batch', healthController.syncStepDataBatch);
  *     responses:
  *       200:
  *         description: Health history records
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 userId:
+ *                   type: string
+ *                   format: uuid
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       date:
+ *                         type: string
+ *                         format: date
+ *                         example: "2026-10-29"
+ *                       steps:
+ *                         type: integer
+ *                         example: 5252
+ *                       distanceKm:
+ *                         type: number
+ *                         example: 3.8
+ *                       activeCalories:
+ *                         type: number
+ *                         example: 240
+ *                       source:
+ *                         type: string
+ *                         example: "apple_health"
+ *                       syncedAt:
+ *                         type: string
+ *                         format: date-time
  *       401:
  *         description: Unauthorized
  */
@@ -156,12 +188,54 @@ router.get('/history', healthController.getHealthHistory);
  * /health/history/all:
  *   get:
  *     summary: Get all recorded health history for user
+ *     description: Returns complete chronological history of daily health records including steps, distanceKm, activeCalories, and lastSyncedAt.
  *     tags: [Health]
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: List of all historical health entries
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 onboardingStartDate:
+ *                   type: string
+ *                   format: date-time
+ *                   nullable: true
+ *                   example: "2026-10-01T10:00:00.000Z"
+ *                 startDate:
+ *                   type: string
+ *                   format: date
+ *                   nullable: true
+ *                   example: "2026-10-15"
+ *                 asOfDate:
+ *                   type: string
+ *                   format: date-time
+ *                   example: "2026-10-30T10:14:00.000Z"
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       date:
+ *                         type: string
+ *                         format: date
+ *                         example: "2026-10-29"
+ *                       steps:
+ *                         type: integer
+ *                         example: 5252
+ *                       distanceKm:
+ *                         type: number
+ *                         example: 3.8
+ *                       activeCalories:
+ *                         type: number
+ *                         example: 240
+ *                       lastSyncedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2026-10-29T12:00:00+00:00"
  *       401:
  *         description: Unauthorized
  */

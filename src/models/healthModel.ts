@@ -13,6 +13,22 @@ export interface HealthSyncBatchRequest {
   platform?: string;
 }
 
+export interface HealthHistoryItem {
+  date: string;
+  steps: number;
+  distanceKm: number;
+  activeCalories: number;
+  lastSyncedAt?: string;
+  source?: string;
+}
+
+export interface HealthHistoryAllResponse {
+  onboardingStartDate?: string;
+  startDate: string | null;
+  asOfDate: string;
+  data: HealthHistoryItem[];
+}
+
 export interface WeeklyReportReportingPeriod {
   weekStartDate: string;
   weekEndDate: string;

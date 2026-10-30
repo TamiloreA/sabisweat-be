@@ -3,6 +3,7 @@ import {
   WeeklyReportData,
   WeeklyReportDailyBreakdown,
   WeeklyReportBestDay,
+  HealthHistoryAllResponse,
 } from '../models/healthModel';
 
 export interface HealthSyncPayload {
@@ -112,7 +113,7 @@ export const syncStepDataBatch = async (
 export const getHealthHistory = async (userId: string, params: { startDate?: string, endDate?: string, limit?: number }, token: string) => {
   let query = getUserSupabase(token)
     .from('daily_steps')
-    .select('date, steps, distance_km, source, synced_at')
+    .select('date, steps, distance_km, active_calories, source, synced_at')
     .eq('user_id', userId)
     .order('date', { ascending: false });
 
@@ -120,44 +121,84 @@ export const getHealthHistory = async (userId: string, params: { startDate?: str
   if (params.endDate) query = query.lte('date', params.endDate);
   if (params.limit) query = query.limit(params.limit);
 
-  const { data, error } = await query;
-  if (error) {
+  let rows: any[] | null = null;
+  let queryError: any = null;
+
+  const initialResult = await query;
+  rows = initialResult.data;
+  queryError = initialResult.error;
+
+  if (queryError && (queryError.code === '42703' || queryError.message?.includes('active_calories'))) {
+    let fallbackQuery = getUserSupabase(token)
+      .from('daily_steps')
+      .select('date, steps, distance_km, source, synced_at')
+      .eq('user_id', userId)
+      .order('date', { ascending: false });
+    if (params.startDate) fallbackQuery = fallbackQuery.gte('date', params.startDate);
+    if (params.endDate) fallbackQuery = fallbackQuery.lte('date', params.endDate);
+    if (params.limit) fallbackQuery = fallbackQuery.limit(params.limit);
+    const retry = await fallbackQuery;
+    rows = retry.data;
+    queryError = retry.error;
+  }
+
+  if (queryError) {
     throw { status: 500, error: 'server_error', message: 'Failed to retrieve history' };
   }
 
   return {
     userId,
-    data: data.map(r => ({
+    data: (rows || []).map((r: any) => ({
       date: r.date,
       steps: r.steps,
       distanceKm: r.distance_km,
+      activeCalories: r.active_calories !== null && r.active_calories !== undefined ? Number(r.active_calories) : 0,
       source: r.source,
       syncedAt: r.synced_at
     }))
   };
 };
 
-export const getHealthHistoryAll = async (userId: string, token: string) => {
+export const getHealthHistoryAll = async (userId: string, token: string): Promise<HealthHistoryAllResponse> => {
   const { data: profile } = await getUserSupabase(token).from('profiles').select('created_at').eq('id', userId).single();
   
-  const { data, error } = await getUserSupabase(token)
+  let rows: any[] | null = null;
+  let queryError: any = null;
+
+  const initialResult = await getUserSupabase(token)
     .from('daily_steps')
-    .select('date, steps, distance_km, synced_at')
+    .select('date, steps, distance_km, active_calories, synced_at')
     .eq('user_id', userId)
     .order('date', { ascending: false });
 
-  if (error) {
+  rows = initialResult.data;
+  queryError = initialResult.error;
+
+  if (queryError && (queryError.code === '42703' || queryError.message?.includes('active_calories'))) {
+    const retry = await getUserSupabase(token)
+      .from('daily_steps')
+      .select('date, steps, distance_km, synced_at')
+      .eq('user_id', userId)
+      .order('date', { ascending: false });
+    rows = retry.data;
+    queryError = retry.error;
+  }
+
+  if (queryError) {
     throw { status: 500, error: 'server_error', message: 'Failed to retrieve all history' };
   }
+
+  const data = rows || [];
 
   return {
     onboardingStartDate: profile?.created_at,
     startDate: data.length > 0 ? data[data.length - 1].date : null,
     asOfDate: new Date().toISOString(),
-    data: data.map(r => ({
+    data: data.map((r: any) => ({
       date: r.date,
       steps: r.steps,
       distanceKm: r.distance_km,
+      activeCalories: r.active_calories !== null && r.active_calories !== undefined ? Number(r.active_calories) : 0,
       lastSyncedAt: r.synced_at
     }))
   };
