@@ -14,6 +14,7 @@ import type {
   LeaderboardResponse,
   CreateChallengeInput,
 } from '../models/challengeModel';
+import type { CompletedChallengeDetail } from '../models/achievementModel';
 
 const CHALLENGES_TABLE = 'challenges';
 const PARTICIPANTS_TABLE = 'challenge_participants';
@@ -921,4 +922,75 @@ export async function createChallenge(
   }
 
   return mapChallengeRow(created as ChallengeRow, 0, { joined: false }, undefined, clubInfo);
+}
+
+/**
+ * GET /challenges/completed
+ * Returns all challenges the user completed (met goal or claimed).
+ */
+export async function getCompletedChallenges(userId: string): Promise<CompletedChallengeDetail[]> {
+  const { data: participations, error: pError } = await supabase
+    .from(PARTICIPANTS_TABLE)
+    .select('challenge_id, joined_at, claimed_at')
+    .eq('user_id', userId)
+    .is('left_at', null);
+
+  if (pError) throw pError;
+  if (!participations || participations.length === 0) return [];
+
+  const challengeIds = participations.map((p) => p.challenge_id);
+
+  const { data: challenges, error: cError } = await supabase
+    .from(CHALLENGES_TABLE)
+    .select('*')
+    .in('id', challengeIds);
+
+  if (cError) throw cError;
+  if (!challenges || challenges.length === 0) return [];
+
+  const partMap = new Map(participations.map((p) => [p.challenge_id, p]));
+  const now = new Date();
+
+  const progressPromises = challenges.map((c) => {
+    const part = partMap.get(c.id);
+    return computeProgress(userId, c as ChallengeRow, part?.joined_at);
+  });
+  const progressResults = await Promise.all(progressPromises);
+
+  const completedList: CompletedChallengeDetail[] = [];
+
+  for (let i = 0; i < challenges.length; i++) {
+    const c = challenges[i] as ChallengeRow;
+    const part = partMap.get(c.id);
+    const prog = progressResults[i];
+    const isEnded = now >= new Date(c.end_at);
+    const isGoalMet = prog.percent >= 100;
+    const isClaimed = Boolean(part?.claimed_at);
+
+    if (isClaimed || (isEnded && isGoalMet) || isGoalMet) {
+      const endDate = new Date(c.end_at);
+      const subtitle = c.subtitle || endDate.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+      const rawRewardId = (c.reward_id || '').toLowerCase().trim();
+      const rewardId = rawRewardId || 'emerald';
+
+      completedList.push({
+        id: c.id,
+        challengeId: c.id,
+        title: c.title,
+        subtitle,
+        rewardId,
+        rewardText: c.reward_text || `${rewardId.charAt(0).toUpperCase() + rewardId.slice(1)} Badge`,
+        startAt: c.start_at,
+        endAt: c.end_at,
+        completedAt: part?.claimed_at || c.end_at,
+        claimedAt: part?.claimed_at ?? null,
+        finalSteps: prog.steps,
+        stepsContributed: prog.steps,
+        goalSteps: c.goal_value || 0,
+        percentage: Math.min(100, Math.round(prog.percent || 100)),
+      });
+    }
+  }
+
+  return completedList;
 }

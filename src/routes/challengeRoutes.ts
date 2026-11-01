@@ -15,6 +15,7 @@ import {
   leaveChallenge,
   getLeaderboard,
   claimReward,
+  getCompletedChallenges,
 } from '../controllers/challengeController';
 import { requireAuth } from '../middleware/auth';
 
@@ -232,6 +233,70 @@ router.get('/available', requireAuth, getAvailableChallenges);
  *         description: Club not found
  */
 router.get('/club/:clubId', requireAuth, getClubChallenges);
+
+/**
+ * @openapi
+ * /challenges/completed:
+ *   get:
+ *     summary: Get completed challenges for the authenticated user
+ *     description: Returns all challenges where the user joined and reached 100% of the goal, ordered by completion date descending.
+ *     tags: [Challenges]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Array of completed challenges with reward gems and step metrics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       challengeId:
+ *                         type: string
+ *                         example: "e0a088f2-9f77-4e65-bdd3-568e8ca6f48d"
+ *                       id:
+ *                         type: string
+ *                         example: "e0a088f2-9f77-4e65-bdd3-568e8ca6f48d"
+ *                       title:
+ *                         type: string
+ *                         example: "Abuja 100K Steps"
+ *                       subtitle:
+ *                         type: string
+ *                         example: "March 2026"
+ *                       rewardId:
+ *                         type: string
+ *                         example: "emerald"
+ *                       rewardText:
+ *                         type: string
+ *                         example: "Emerald Finisher Badge"
+ *                       completedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2026-03-15T18:30:00.000Z"
+ *                       claimedAt:
+ *                         type: string
+ *                         nullable: true
+ *                       stepsContributed:
+ *                         type: integer
+ *                         example: 105420
+ *                       goalSteps:
+ *                         type: integer
+ *                         example: 100000
+ *                       percentage:
+ *                         type: integer
+ *                         example: 100
+ *       401:
+ *         description: Missing or invalid token
+ */
+router.get('/completed', requireAuth, getCompletedChallenges);
 
 /**
  * @openapi

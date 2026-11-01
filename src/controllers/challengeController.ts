@@ -200,3 +200,12 @@ export const createChallenge = async (req: Request, res: Response, next: NextFun
     next(error);
   }
 };
+
+export const getCompletedChallenges = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const challenges = await challengeService.getCompletedChallenges(req.user!.id);
+    res.status(200).json({ status: 'success', success: true, data: challenges });
+  } catch (error) {
+    next(error);
+  }
+};
