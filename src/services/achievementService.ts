@@ -411,6 +411,7 @@ export async function getAchievementsSummary(
     },
     monthlyBadges: {
       activeMonth,
+      currentProgress: monthlyStepsMap.get(activeMonth) || 0,
       items: monthlyItems,
     },
     inviteBadges: {

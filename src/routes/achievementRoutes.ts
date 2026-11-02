@@ -110,6 +110,9 @@ const router = Router();
  *                         activeMonth:
  *                           type: string
  *                           example: "2026-03"
+ *                         currentProgress:
+ *                           type: integer
+ *                           example: 30000
  *                         items:
  *                           type: array
  *                           items:

@@ -40,6 +40,7 @@ export interface MonthlyBadgeItem {
 
 export interface MonthlyBadgesCategory {
   activeMonth: string;
+  currentProgress: number;
   items: MonthlyBadgeItem[];
 }
 
