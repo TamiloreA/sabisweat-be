@@ -16,6 +16,9 @@ import streaksRoutes from './routes/streaksRoutes';
 import challengeRoutes from './routes/challengeRoutes';
 import versionRoutes from './routes/versionRoutes';
 import achievementRoutes from './routes/achievementRoutes';
+import emailNotificationRoutes from './routes/emailNotificationRoutes';
+import notificationRoutes from './routes/notificationRoutes';
+import adminPushRoutes from './routes/adminPushRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { apiRateLimiter } from './middleware/rateLimiter';
 
@@ -45,7 +48,22 @@ app.use('/health', healthRoutes);
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/home', homeRoutes);
 app.use('/api/v1/points', pointsRoutes);
+
+// Push — mounted both at root and /api/v1
+app.use('/push', pushRoutes);
 app.use('/api/v1/push', pushRoutes);
+
+// In-App Notifications — mounted both at root and /api/v1
+app.use('/notifications', notificationRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
+
+// Email Notifications — mounted both at root and /api/v1
+app.use('/email-notifications', emailNotificationRoutes);
+app.use('/api/v1/email-notifications', emailNotificationRoutes);
+
+// Admin Push / Testing / Cron
+app.use('/admin/push', adminPushRoutes);
+app.use('/api/v1/admin/push', adminPushRoutes);
 
 // Community — also at root to match the mobile app's existing paths
 app.use('/community', communityRoutes);
