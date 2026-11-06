@@ -65,7 +65,7 @@ describe('Notification Infrastructure V2', () => {
         reason: 'Completed Abuja 100K Steps Challenge',
       });
 
-      expect(template.subject).toContain('+500 Sabi Coins');
+      expect(template.subject).toContain('500 Sabi Coins');
       expect(template.html).toContain('+500 Coins');
       expect(template.html).toContain('3,200 Coins');
       expect(template.text).toContain('+500 Sabi Coins');

@@ -8,6 +8,7 @@ import { Router } from 'express';
 import {
   getActiveChallenges,
   getAvailableChallenges,
+  getPastChallenges,
   getClubChallenges,
   getChallengeById,
   createChallenge,
@@ -145,14 +146,36 @@ router.post('/', requireAuth, createChallenge);
  * @openapi
  * /challenges/active:
  *   get:
- *     summary: Get challenges the current user has joined
- *     description: Returns active joined challenges along with progress data. Note that progress (steps) is calculated starting from the date the user joined the challenge (joined_at), not the challenge start date.
+ *     summary: Get challenges the current user has joined (paginated)
+ *     description: Returns paginated active joined challenges along with progress data. Note that progress (steps) is calculated starting from the date the user joined the challenge (joined_at), not the challenge start date.
  *     tags: [Challenges]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number (1-based, default: 1)
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page (default: 10)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Optional alias for size
  *     responses:
  *       200:
- *         description: List of active joined challenges with progress data
+ *         description: Paginated list of active joined challenges with progress data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PaginatedChallengesResponse'
  *       401:
  *         description: Missing or invalid token
  */
@@ -162,11 +185,28 @@ router.get('/active', requireAuth, getActiveChallenges);
  * @openapi
  * /challenges/available:
  *   get:
- *     summary: Get challenges available to join (not yet joined)
+ *     summary: Get challenges available to join (paginated, not yet joined)
  *     tags: [Challenges]
  *     security:
  *       - bearerAuth: []
  *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number (1-based, default: 1)
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page (default: 10)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Optional alias for size
  *       - in: query
  *         name: country
  *         schema:
@@ -179,11 +219,54 @@ router.get('/active', requireAuth, getActiveChallenges);
  *         description: Filter by region
  *     responses:
  *       200:
- *         description: List of available challenges
+ *         description: Paginated list of available challenges
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PaginatedChallengesResponse'
  *       401:
  *         description: Missing or invalid token
  */
 router.get('/available', requireAuth, getAvailableChallenges);
+
+/**
+ * @openapi
+ * /challenges/past:
+ *   get:
+ *     summary: Get past challenges (paginated)
+ *     description: Returns challenges whose endAt timestamp has elapsed, ordered by most recently ended (endAt DESC).
+ *     tags: [Challenges]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number (1-based, default: 1)
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page (default: 10)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Optional alias for size
+ *     responses:
+ *       200:
+ *         description: Paginated list of past challenges
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PaginatedChallengesResponse'
+ *       401:
+ *         description: Missing or invalid token
+ */
+router.get('/past', requireAuth, getPastChallenges);
 
 /**
  * @openapi
@@ -376,7 +459,7 @@ router.post('/:id/leave', requireAuth, leaveChallenge);
  * /challenges/{id}/leaderboard:
  *   get:
  *     summary: Get challenge leaderboard (paginated)
- *     description: Ranked by total steps. Steps are only counted from the date each user joined the challenge.
+ *     description: Ranked by total steps. Steps are only counted from the date each user joined the challenge. Includes authenticated user's ranking in currentUser.
  *     tags: [Challenges]
  *     security:
  *       - bearerAuth: []
@@ -391,14 +474,20 @@ router.post('/:id/leave', requireAuth, leaveChallenge);
  *         schema:
  *           type: integer
  *           default: 0
+ *         description: Page number (0-based, default: 0)
  *       - in: query
  *         name: size
  *         schema:
  *           type: integer
  *           default: 20
+ *         description: Items per page (default: 20)
  *     responses:
  *       200:
- *         description: Paginated leaderboard with user profiles and step counts
+ *         description: Paginated leaderboard with currentUser rank and step counts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/LeaderboardResponse'
  *       404:
  *         description: Challenge not found
  *       401:

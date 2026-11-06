@@ -346,20 +346,41 @@ router.get('/posts/:id', requireAuth, getPostById);
  *             schema:
  *               $ref: '#/components/schemas/Club'
  *   get:
- *     summary: Get all approved clubs
+ *     summary: Get all approved clubs (paginated)
  *     tags: [Community]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number (1-based, default: 1)
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page (default: 10)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Optional alias for size
  *     responses:
  *       200:
- *         description: List of clubs
+ *         description: Paginated list of clubs
  *         content:
  *           application/json:
  *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/Club'
- *               example:
+ *               $ref: '#/components/schemas/PaginatedClubsResponse'
+ *             example:
+ *               page: 1
+ *               size: 10
+ *               total: 85
+ *               hasMore: true
+ *               data:
  *                 - id: "43bf4206-8d65-4f35-985e-5bb49dfa68c0"
  *                   clubId: "@the_movers"
  *                   name: "The Movers"
@@ -377,31 +398,6 @@ router.get('/posts/:id', requireAuth, getPostById);
  *                   status: "approved"
  *                   membersCount: 12
  *                   joinStatus: "joined"
- *                   isAdmin: false
- *                   createdAt: "2026-10-10T00:00:00.000Z"
- *                 - id: "89c74820-21a4-4df1-8664-9fbb4223ba8e"
- *                   clubId: "@global_sweaters"
- *                   name: "Global Sweaters"
- *                   description: "Running everywhere"
- *                   tag: "team"
- *                   locationScope: "multiple"
- *                   locationText: "Nigeria, United Kingdom"
- *                   country: null
- *                   countryCode: null
- *                   regions: []
- *                   countries:
- *                     - country: "Nigeria"
- *                       countryCode: "NG"
- *                       regions: ["Lagos", "Abuja, FCT"]
- *                     - country: "United Kingdom"
- *                       countryCode: "GB"
- *                       regions: ["London", "Manchester"]
- *                   coverImageUrl: null
- *                   profileImageUrl: null
- *                   theme: "blue"
- *                   status: "approved"
- *                   membersCount: 35
- *                   joinStatus: "none"
  *                   isAdmin: false
  *                   createdAt: "2026-10-10T00:00:00.000Z"
  */

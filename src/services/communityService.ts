@@ -19,6 +19,7 @@ import {
   CreateAnnouncementInput,
   ReportClubInput,
   MyPostsResult,
+  PaginatedClubsResponse,
 } from '../models/communityModel';
 
 const POSTS_TABLE = 'community_posts';
@@ -781,7 +782,14 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
   };
 }
 
-export async function getClubs(userId?: string): Promise<ClubDetail[]> {
+export async function getClubs(
+  userId?: string,
+  page: number = 1,
+  size: number = 10
+): Promise<PaginatedClubsResponse> {
+  const currentPage = Math.max(1, page);
+  const pageSize = Math.max(1, size);
+
   let query = supabase.from(CLUBS_TABLE).select('*');
   if (userId) {
     query = query.or(`status.eq.approved,and(status.eq.pending,created_by.eq.${userId})`);
@@ -792,51 +800,57 @@ export async function getClubs(userId?: string): Promise<ClubDetail[]> {
   const { data: clubs, error } = await query.order('created_at', { ascending: false });
 
   if (error) throw error;
-  if (!clubs?.length) return [];
+  if (!clubs?.length) {
+    return { page: currentPage, size: pageSize, total: 0, hasMore: false, data: [] };
+  }
 
-  const clubIds = clubs.map((c: any) => c.id);
+  const total = clubs.length;
+  const start = (currentPage - 1) * pageSize;
+  const pageClubs = clubs.slice(start, start + pageSize);
+  const hasMore = currentPage * pageSize < total;
 
-  // Fetch all members to compute counts and joined status
+  if (pageClubs.length === 0) {
+    return { page: currentPage, size: pageSize, total, hasMore: false, data: [] };
+  }
+
+  const pageClubIds = pageClubs.map((c: any) => c.id);
+
+  // Fetch members only for pageClubIds to compute counts and joined status
   const { data: membersRes, error: membersError } = await supabase
     .from(CLUB_MEMBERS_TABLE)
     .select('club_id, user_id, role')
-    .in('club_id', clubIds);
+    .in('club_id', pageClubIds);
 
   if (membersError) throw membersError;
 
   const memberCounts = new Map<string, number>();
   const myJoinedClubs = new Set<string>();
+  const myAdminClubs = new Set<string>();
 
   for (const member of membersRes ?? []) {
     memberCounts.set(member.club_id, (memberCounts.get(member.club_id) ?? 0) + 1);
     if (userId && member.user_id === userId) {
       myJoinedClubs.add(member.club_id);
-    }
-  }
-
-  const myAdminClubs = new Set<string>();
-  if (userId) {
-    for (const member of membersRes ?? []) {
-      if (member.user_id === userId && member.role === 'admin') {
+      if (member.role === 'admin') {
         myAdminClubs.add(member.club_id);
       }
     }
   }
 
   const myPendingRequests = new Set<string>();
-  if (userId && clubIds.length > 0) {
+  if (userId && pageClubIds.length > 0) {
     const { data: reqs } = await supabase
       .from('club_join_requests')
       .select('club_id')
       .eq('user_id', userId)
       .eq('status', 'pending')
-      .in('club_id', clubIds);
+      .in('club_id', pageClubIds);
     for (const req of reqs ?? []) {
       myPendingRequests.add(req.club_id);
     }
   }
 
-  return clubs.map((club: any) => ({
+  const data = pageClubs.map((club: any) => ({
     id: club.id,
     clubId: club.tag || club.id,
     name: club.name,
@@ -853,10 +867,18 @@ export async function getClubs(userId?: string): Promise<ClubDetail[]> {
     theme: club.theme,
     status: club.status,
     membersCount: memberCounts.get(club.id) ?? 0,
-    joinStatus: userId ? (myJoinedClubs.has(club.id) ? 'joined' : (myPendingRequests.has(club.id) ? 'pending' : 'none')) : 'none',
+    joinStatus: (userId ? (myJoinedClubs.has(club.id) ? 'joined' : (myPendingRequests.has(club.id) ? 'pending' : 'none')) : 'none') as 'joined' | 'pending' | 'none',
     isAdmin: userId ? myAdminClubs.has(club.id) : false,
     createdAt: club.created_at,
   }));
+
+  return {
+    page: currentPage,
+    size: pageSize,
+    total,
+    hasMore,
+    data,
+  };
 }
 
 export async function getClubById(clubId: string, userId?: string): Promise<ClubDetail | null> {

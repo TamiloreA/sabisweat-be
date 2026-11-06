@@ -36,13 +36,9 @@ BEGIN
   END IF;
 END $$;
 
--- 1.2 Convert USER-DEFINED types (citext / custom enums) to text and set defaults
-ALTER TABLE public.profiles ALTER COLUMN username TYPE TEXT;
-ALTER TABLE public.profiles ALTER COLUMN onboarding_status TYPE TEXT;
-ALTER TABLE public.profiles ALTER COLUMN onboarding_status SET DEFAULT 'not_started';
-ALTER TABLE public.profiles ALTER COLUMN step_goal SET DEFAULT 8000;
+-- 1.2 Drop column default and legacy check constraints before type altering
+ALTER TABLE public.profiles ALTER COLUMN onboarding_status DROP DEFAULT;
 
--- 1.3 Drop legacy check constraints that conflict with V2 values
 DO $$
 DECLARE
   r RECORD;
@@ -57,7 +53,13 @@ BEGIN
   END LOOP;
 END $$;
 
--- 1.4 Normalize legacy gender values to V2 standard options
+-- 1.3 Convert USER-DEFINED types (citext / custom enums) to text USING ...::text
+ALTER TABLE public.profiles ALTER COLUMN username TYPE TEXT USING username::text;
+ALTER TABLE public.profiles ALTER COLUMN onboarding_status TYPE TEXT USING onboarding_status::text;
+ALTER TABLE public.profiles ALTER COLUMN onboarding_status SET DEFAULT 'not_started';
+ALTER TABLE public.profiles ALTER COLUMN step_goal SET DEFAULT 8000;
+
+-- 1.4 Normalize legacy gender and onboarding_status values
 UPDATE public.profiles
 SET gender = 'Female'
 WHERE gender = 'Woman' OR LOWER(gender) = 'female';
@@ -74,7 +76,40 @@ UPDATE public.profiles
 SET gender = 'Non-binary'
 WHERE LOWER(gender) IN ('non-binary', 'nonbinary', 'non_binary');
 
--- 1.5 Add V2 check constraints for gender and onboarding_status
+-- Normalize any unexpected gender values not in the check list to NULL
+UPDATE public.profiles
+SET gender = NULL
+WHERE gender IS NOT NULL
+  AND gender NOT IN ('Female', 'Male', 'Non-binary', 'Prefer not to say', 'Woman', 'Man', 'Others');
+
+-- Normalize onboarding_status to V2 valid statuses
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'finished_onboarded_at'
+  ) THEN
+    UPDATE public.profiles
+    SET onboarding_status = CASE
+      WHEN finished_onboarded_at IS NOT NULL THEN 'completed'
+      WHEN LOWER(onboarding_status) IN ('completed', 'complete', 'done', 'finished') THEN 'completed'
+      WHEN LOWER(onboarding_status) IN ('in_progress', 'started', 'onboarding') THEN 'in_progress'
+      ELSE 'not_started'
+    END
+    WHERE onboarding_status IS NULL OR onboarding_status NOT IN ('not_started', 'in_progress', 'completed');
+  ELSE
+    UPDATE public.profiles
+    SET onboarding_status = CASE
+      WHEN LOWER(onboarding_status) IN ('completed', 'complete', 'done', 'finished') THEN 'completed'
+      WHEN LOWER(onboarding_status) IN ('in_progress', 'started', 'onboarding') THEN 'in_progress'
+      ELSE 'not_started'
+    END
+    WHERE onboarding_status IS NULL OR onboarding_status NOT IN ('not_started', 'in_progress', 'completed');
+  END IF;
+END $$;
+
+-- 1.5 Add V2 check constraints for gender and onboarding_status (idempotent)
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_gender_check;
 ALTER TABLE public.profiles
   ADD CONSTRAINT profiles_gender_check
   CHECK (
@@ -82,6 +117,7 @@ ALTER TABLE public.profiles
     gender IN ('Female', 'Male', 'Non-binary', 'Prefer not to say', 'Woman', 'Man', 'Others')
   );
 
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_onboarding_status_check;
 ALTER TABLE public.profiles
   ADD CONSTRAINT profiles_onboarding_status_check
   CHECK (
@@ -304,6 +340,60 @@ END $$;
 -- 4. UPGRADE OVERLAPPING FEATURE TABLES
 -- ==============================================================================
 
+-- 4.0 Drop NOT NULL on legacy V1-only columns not used in V2
+DO $$
+BEGIN
+  -- challenges
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'challenges' AND column_name = 'category') THEN
+    ALTER TABLE public.challenges ALTER COLUMN category DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'challenges' AND column_name = 'visible') THEN
+    ALTER TABLE public.challenges ALTER COLUMN visible DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'challenges' AND column_name = 'published') THEN
+    ALTER TABLE public.challenges ALTER COLUMN published DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'challenges' AND column_name = 'participants_count') THEN
+    ALTER TABLE public.challenges ALTER COLUMN participants_count DROP NOT NULL;
+  END IF;
+
+  -- news
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'news' AND column_name = 'news_date') THEN
+    ALTER TABLE public.news ALTER COLUMN news_date DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'news' AND column_name = 'news_time') THEN
+    ALTER TABLE public.news ALTER COLUMN news_time DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'news' AND column_name = 'updated_at') THEN
+    ALTER TABLE public.news ALTER COLUMN updated_at DROP NOT NULL;
+  END IF;
+
+  -- clubs
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'clubs' AND column_name = 'members_count') THEN
+    ALTER TABLE public.clubs ALTER COLUMN members_count DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'clubs' AND column_name = 'visible') THEN
+    ALTER TABLE public.clubs ALTER COLUMN visible DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'clubs' AND column_name = 'updated_at') THEN
+    ALTER TABLE public.clubs ALTER COLUMN updated_at DROP NOT NULL;
+  END IF;
+
+  -- club_events
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'club_events' AND column_name = 'image_url') THEN
+    ALTER TABLE public.club_events ALTER COLUMN image_url DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'club_events' AND column_name = 'rsvp_count') THEN
+    ALTER TABLE public.club_events ALTER COLUMN rsvp_count DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'club_events' AND column_name = 'visible') THEN
+    ALTER TABLE public.club_events ALTER COLUMN visible DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'club_events' AND column_name = 'updated_at') THEN
+    ALTER TABLE public.club_events ALTER COLUMN updated_at DROP NOT NULL;
+  END IF;
+END $$;
+
 -- 4.1 Clubs
 ALTER TABLE public.clubs
   ADD COLUMN IF NOT EXISTS theme TEXT DEFAULT 'green',
@@ -331,8 +421,21 @@ ALTER TABLE public.clubs ENABLE ROW LEVEL SECURITY;
 GRANT ALL ON TABLE public.clubs TO anon, authenticated, service_role;
 
 -- 4.2 Club Members
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'club_members' AND column_name = 'id') THEN
+    ALTER TABLE public.club_members ALTER COLUMN id SET DEFAULT gen_random_uuid();
+  END IF;
+END $$;
+
 ALTER TABLE public.club_members
   ADD COLUMN IF NOT EXISTS role public.club_role DEFAULT 'member';
+
+DELETE FROM public.club_members WHERE user_id NOT IN (SELECT id FROM public.profiles);
+ALTER TABLE public.club_members DROP CONSTRAINT IF EXISTS club_members_user_id_fkey;
+ALTER TABLE public.club_members
+  ADD CONSTRAINT club_members_user_id_fkey
+  FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_club_members_club_user ON public.club_members(club_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_club_members_user_id ON public.club_members(user_id);
@@ -394,6 +497,12 @@ ALTER TABLE public.challenge_participants
   ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
 
+DELETE FROM public.challenge_participants WHERE user_id NOT IN (SELECT id FROM public.profiles);
+ALTER TABLE public.challenge_participants DROP CONSTRAINT IF EXISTS challenge_participants_user_id_fkey;
+ALTER TABLE public.challenge_participants
+  ADD CONSTRAINT challenge_participants_user_id_fkey
+  FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
 CREATE UNIQUE INDEX IF NOT EXISTS unique_challenge_user ON public.challenge_participants(challenge_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_challenge_participants_active ON public.challenge_participants(challenge_id, user_id) WHERE left_at IS NULL;
 ALTER TABLE public.challenge_participants ENABLE ROW LEVEL SECURITY;
@@ -416,11 +525,27 @@ ALTER TABLE public.news ENABLE ROW LEVEL SECURITY;
 GRANT ALL ON TABLE public.news TO anon, authenticated, service_role;
 
 -- 4.7 News Comments & Likes
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'news_likes' AND column_name = 'id') THEN
+    ALTER TABLE public.news_likes ALTER COLUMN id SET DEFAULT gen_random_uuid();
+  END IF;
+END $$;
+
+DELETE FROM public.news_comments WHERE user_id NOT IN (SELECT id FROM public.profiles);
 ALTER TABLE public.news_comments
   DROP CONSTRAINT IF EXISTS news_comments_user_id_fkey;
 
 ALTER TABLE public.news_comments
   ADD CONSTRAINT news_comments_user_id_fkey
+  FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
+DELETE FROM public.news_likes WHERE user_id NOT IN (SELECT id FROM public.profiles);
+ALTER TABLE public.news_likes
+  DROP CONSTRAINT IF EXISTS news_likes_user_id_fkey;
+
+ALTER TABLE public.news_likes
+  ADD CONSTRAINT news_likes_user_id_fkey
   FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_news_likes_news_user ON public.news_likes(news_id, user_id);
@@ -458,6 +583,13 @@ ALTER TABLE public.user_devices
 CREATE UNIQUE INDEX IF NOT EXISTS uq_user_device_token_idx
   ON public.user_devices (user_id, expo_push_token);
 CREATE INDEX IF NOT EXISTS idx_user_devices_user_active ON public.user_devices(user_id, is_active);
+
+DELETE FROM public.user_devices WHERE user_id NOT IN (SELECT id FROM public.profiles);
+ALTER TABLE public.user_devices DROP CONSTRAINT IF EXISTS user_devices_user_id_fkey;
+ALTER TABLE public.user_devices
+  ADD CONSTRAINT user_devices_user_id_fkey
+  FOREIGN KEY (user_id) REFERENCES public.profiles(id) ON DELETE CASCADE;
+
 ALTER TABLE public.user_devices ENABLE ROW LEVEL SECURITY;
 GRANT ALL ON TABLE public.user_devices TO anon, authenticated, service_role;
 
@@ -748,16 +880,17 @@ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'in_app_notifications') THEN
     INSERT INTO public.notifications (id, user_id, type, title, body, description, data, read_at, created_at)
     SELECT
-      id,
-      user_id,
-      type,
-      title,
-      COALESCE(description, title),
-      description,
-      COALESCE(meta, '{}'::jsonb),
-      read_at,
-      created_at
-    FROM public.in_app_notifications
+      ian.id,
+      ian.user_id,
+      ian.type,
+      ian.title,
+      COALESCE(ian.description, ian.title),
+      ian.description,
+      COALESCE(ian.meta, '{}'::jsonb),
+      ian.read_at,
+      ian.created_at
+    FROM public.in_app_notifications ian
+    INNER JOIN public.profiles p ON p.id = ian.user_id
     ON CONFLICT (id) DO NOTHING;
   END IF;
 END $$;

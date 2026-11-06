@@ -167,8 +167,11 @@ export const createClub = async (req: Request, res: Response, next: NextFunction
 
 export const getClubs = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const clubs = await communityService.getClubs(req.user?.sub);
-    res.status(200).json({ success: true, data: clubs });
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const size = Math.min(100, Math.max(1, Number(req.query.size || req.query.limit) || 10));
+
+    const result = await communityService.getClubs(req.user?.sub, page, size);
+    res.status(200).json(result);
   } catch (error) {
     next(error);
   }

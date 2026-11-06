@@ -85,10 +85,13 @@ export interface ChallengeProgress {
   daysRemaining: number;
 }
 
+export type ClubTheme = 'green' | 'orange' | 'purple' | 'blue' | 'dark' | 'pink' | 'white';
+
 export interface ChallengeHost {
   name: string;
   logoUrl?: string;
   clubId?: string;
+  theme?: ClubTheme | string;
 }
 
 export interface ChallengeResponse {
@@ -140,5 +143,15 @@ export interface LeaderboardResponse {
   page: number;
   size: number;
   total: number;
+  currentUser?: LeaderboardEntry | null;
   data: LeaderboardEntry[];
 }
+
+export interface PaginatedChallengesResponse {
+  page: number;
+  size: number;
+  total: number;
+  hasMore: boolean;
+  data: ChallengeResponse[];
+}
+

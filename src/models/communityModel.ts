@@ -149,6 +149,14 @@ export interface ClubDetail {
   createdAt: string;
 }
 
+export interface PaginatedClubsResponse {
+  page: number;
+  size: number;
+  total: number;
+  hasMore: boolean;
+  data: ClubDetail[];
+}
+
 export interface CreateClubInput {
   name: string;
   clubId?: string;

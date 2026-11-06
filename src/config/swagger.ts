@@ -56,9 +56,15 @@ const options: swaggerJsdoc.Options = {
         ChallengeHost: {
           type: 'object',
           properties: {
-            name: { type: 'string', example: 'Ekò Runners Club' },
+            name: { type: 'string', example: 'The MOvers' },
             logoUrl: { type: 'string', nullable: true, example: 'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b' },
-            clubId: { type: 'string', nullable: true, example: '43bf4206-8d65-4f35-985e-5bb49dfa68c0' },
+            clubId: { type: 'string', nullable: true, example: '611c89b9-5b6e-44fe-94b8-ac70dd31c2b0' },
+            theme: {
+              type: 'string',
+              enum: ['green', 'orange', 'purple', 'blue', 'dark', 'pink', 'white'],
+              example: 'green',
+              description: "Club's brand theme color",
+            },
           },
         },
         Challenge: {
@@ -103,6 +109,53 @@ const options: swaggerJsdoc.Options = {
             leaderboardVisibility: { type: 'string', enum: ['public', 'private'], example: 'public' },
           },
         },
+        LeaderboardEntry: {
+          type: 'object',
+          properties: {
+            rank: { type: 'integer', example: 1 },
+            user: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', format: 'uuid', example: 'e99f51d5-0025-4298-95c8-d66f55b7a496' },
+                username: { type: 'string', example: 'Tammy' },
+                displayName: { type: 'string', example: 'Tammy Akin' },
+                photoUrl: { type: 'string', nullable: true },
+                avatarId: { type: 'string', example: 'male-40sto50s-straightsize-coral-shortwavyhairandmoustache-activeweartop' },
+              },
+            },
+            steps: { type: 'integer', example: 28400 },
+            score: { type: 'string', example: '28400' },
+          },
+        },
+        LeaderboardResponse: {
+          type: 'object',
+          properties: {
+            page: { type: 'integer', example: 0 },
+            size: { type: 'integer', example: 20 },
+            total: { type: 'integer', example: 1420 },
+            currentUser: {
+              $ref: '#/components/schemas/LeaderboardEntry',
+              nullable: true,
+            },
+            data: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/LeaderboardEntry' },
+            },
+          },
+        },
+        PaginatedChallengesResponse: {
+          type: 'object',
+          properties: {
+            page: { type: 'integer', example: 1 },
+            size: { type: 'integer', example: 10 },
+            total: { type: 'integer', example: 24 },
+            hasMore: { type: 'boolean', example: true },
+            data: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/Challenge' },
+            },
+          },
+        },
         ClubCountry: {
           type: 'object',
           properties: {
@@ -145,6 +198,19 @@ const options: swaggerJsdoc.Options = {
             joinStatus: { type: 'string', enum: ['joined', 'pending', 'none'], example: 'joined' },
             isAdmin: { type: 'boolean', example: false },
             createdAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        PaginatedClubsResponse: {
+          type: 'object',
+          properties: {
+            page: { type: 'integer', example: 1 },
+            size: { type: 'integer', example: 10 },
+            total: { type: 'integer', example: 85 },
+            hasMore: { type: 'boolean', example: true },
+            data: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/Club' },
+            },
           },
         },
         WeeklyReportReportingPeriod: {

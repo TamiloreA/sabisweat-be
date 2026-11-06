@@ -13,6 +13,7 @@ import type {
   LeaderboardEntry,
   LeaderboardResponse,
   CreateChallengeInput,
+  PaginatedChallengesResponse,
 } from '../models/challengeModel';
 import type { CompletedChallengeDetail } from '../models/achievementModel';
 
@@ -72,6 +73,7 @@ interface ClubHostInfo {
   id: string;
   name: string;
   profile_image_url: string | null;
+  theme: string | null;
 }
 
 async function fetchClubsMap(ids: (string | null | undefined)[]): Promise<Map<string, ClubHostInfo>> {
@@ -80,7 +82,7 @@ async function fetchClubsMap(ids: (string | null | undefined)[]): Promise<Map<st
 
   const { data, error } = await supabase
     .from(CLUBS_TABLE)
-    .select('id, name, profile_image_url')
+    .select('id, name, profile_image_url, theme')
     .in('id', uniqueIds);
 
   if (error) return new Map();
@@ -106,7 +108,7 @@ function daysBetween(startStr: string, endStr: string): number {
 }
 
 function formatStepsAsScore(steps: number): string {
-  return steps.toLocaleString('en-US');
+  return String(steps);
 }
 
 /**
@@ -210,6 +212,7 @@ function mapChallengeRow(
   const hostName = clubInfo?.name ?? row.host_name;
   const hostLogoUrl = clubInfo?.profile_image_url ?? row.host_logo_url;
   const hostClubId = clubInfo?.id ?? row.host_club_id;
+  const hostTheme = clubInfo?.theme || undefined;
 
   return {
     id: row.id,
@@ -227,6 +230,7 @@ function mapChallengeRow(
           name: hostName ?? '',
           logoUrl: hostLogoUrl ?? undefined,
           clubId: hostClubId ?? undefined,
+          theme: hostTheme,
         }
       : undefined,
     sponsorText: row.sponsor_text ?? undefined,
@@ -254,9 +258,16 @@ function mapChallengeRow(
 
 /**
  * GET /challenges/active
- * Returns challenges the user has joined and that haven't ended.
+ * Returns challenges the user has joined (paginated).
  */
-export async function getActiveChallenges(userId: string): Promise<ChallengeResponse[]> {
+export async function getActiveChallenges(
+  userId: string,
+  page: number = 1,
+  size: number = 10
+): Promise<PaginatedChallengesResponse> {
+  const currentPage = Math.max(1, page);
+  const pageSize = Math.max(1, size);
+
   // 1. Get user's active participations
   const { data: participations, error: pError } = await supabase
     .from(PARTICIPANTS_TABLE)
@@ -265,7 +276,9 @@ export async function getActiveChallenges(userId: string): Promise<ChallengeResp
     .is('left_at', null);
 
   if (pError) throw pError;
-  if (!participations || participations.length === 0) return [];
+  if (!participations || participations.length === 0) {
+    return { page: currentPage, size: pageSize, total: 0, hasMore: false, data: [] };
+  }
 
   const challengeIds = participations.map((p) => p.challenge_id);
 
@@ -273,30 +286,38 @@ export async function getActiveChallenges(userId: string): Promise<ChallengeResp
   const { data: challenges, error: cError } = await supabase
     .from(CHALLENGES_TABLE)
     .select('*')
-    .in('id', challengeIds);
+    .in('id', challengeIds)
+    .order('start_at', { ascending: false });
 
   if (cError) throw cError;
-  if (!challenges) return [];
+  if (!challenges || challenges.length === 0) {
+    return { page: currentPage, size: pageSize, total: 0, hasMore: false, data: [] };
+  }
+
+  const total = challenges.length;
+  const start = (currentPage - 1) * pageSize;
+  const pageChallenges = challenges.slice(start, start + pageSize);
+  const hasMore = currentPage * pageSize < total;
 
   // Build a map of participations for quick lookup
   const partMap = new Map(participations.map((p) => [p.challenge_id, p]));
 
   // Resolve clubs for challenges with host_club_id
-  const clubsMap = await fetchClubsMap(challenges.map((c) => c.host_club_id));
+  const clubsMap = await fetchClubsMap(pageChallenges.map((c) => c.host_club_id));
 
-  // 3. Get participants count for each challenge
-  const countPromises = challenges.map((c) => getParticipantsCount(c.id));
+  // 3. Get participants count for each page challenge
+  const countPromises = pageChallenges.map((c) => getParticipantsCount(c.id));
   const counts = await Promise.all(countPromises);
 
-  // 4. Compute progress for each
-  const progressPromises = challenges.map((c) => {
+  // 4. Compute progress for each page challenge
+  const progressPromises = pageChallenges.map((c) => {
     const part = partMap.get(c.id);
     return computeProgress(userId, c as ChallengeRow, part?.joined_at);
   });
   const progressResults = await Promise.all(progressPromises);
 
   // 5. Map to response
-  return challenges.map((c, i) => {
+  const data = pageChallenges.map((c, i) => {
     const part = partMap.get(c.id);
     return mapChallengeRow(
       c as ChallengeRow,
@@ -310,16 +331,27 @@ export async function getActiveChallenges(userId: string): Promise<ChallengeResp
       clubsMap.get(c.host_club_id)
     );
   });
+
+  return {
+    page: currentPage,
+    size: pageSize,
+    total,
+    hasMore,
+    data,
+  };
 }
 
 /**
  * GET /challenges/available
- * Returns challenges the user has NOT joined, optionally filtered by country/region.
+ * Returns challenges the user has NOT joined (paginated), optionally filtered by country/region.
  */
 export async function getAvailableChallenges(
   userId: string,
-  filters?: { country?: string; region?: string }
-): Promise<ChallengeResponse[]> {
+  filters?: { page?: number; size?: number; country?: string; region?: string }
+): Promise<PaginatedChallengesResponse> {
+  const currentPage = Math.max(1, filters?.page ?? 1);
+  const pageSize = Math.max(1, filters?.size ?? 10);
+
   // 1. Get challenge IDs user has already joined (and not left)
   const { data: participations, error: pError } = await supabase
     .from(PARTICIPANTS_TABLE)
@@ -334,7 +366,8 @@ export async function getAvailableChallenges(
   let query = supabase
     .from(CHALLENGES_TABLE)
     .select('*')
-    .gte('end_at', new Date().toISOString());
+    .gte('end_at', new Date().toISOString())
+    .order('start_at', { ascending: false });
 
   if (filters?.country) {
     query = query.eq('country', filters.country);
@@ -345,21 +378,127 @@ export async function getAvailableChallenges(
 
   const { data: challenges, error: cError } = await query;
   if (cError) throw cError;
-  if (!challenges) return [];
+  if (!challenges || challenges.length === 0) {
+    return { page: currentPage, size: pageSize, total: 0, hasMore: false, data: [] };
+  }
 
   // 3. Filter out joined challenges
   const available = challenges.filter((c) => !joinedIds.has(c.id));
+  const total = available.length;
+  const start = (currentPage - 1) * pageSize;
+  const pageChallenges = available.slice(start, start + pageSize);
+  const hasMore = currentPage * pageSize < total;
 
-  // Resolve clubs for available challenges
-  const clubsMap = await fetchClubsMap(available.map((c) => c.host_club_id));
+  // Resolve clubs for available challenges on this page
+  const clubsMap = await fetchClubsMap(pageChallenges.map((c) => c.host_club_id));
 
-  // 4. Get participant counts
-  const countPromises = available.map((c) => getParticipantsCount(c.id));
+  // 4. Get participant counts for page challenges
+  const countPromises = pageChallenges.map((c) => getParticipantsCount(c.id));
   const counts = await Promise.all(countPromises);
 
-  return available.map((c, i) =>
+  const data = pageChallenges.map((c, i) =>
     mapChallengeRow(c as ChallengeRow, counts[i], { joined: false }, undefined, clubsMap.get(c.host_club_id))
   );
+
+  return {
+    page: currentPage,
+    size: pageSize,
+    total,
+    hasMore,
+    data,
+  };
+}
+
+/**
+ * GET /challenges/past
+ * Returns challenges whose endAt timestamp has elapsed, ordered by endAt DESC (paginated).
+ */
+export async function getPastChallenges(
+  userId?: string,
+  page: number = 1,
+  size: number = 10
+): Promise<PaginatedChallengesResponse> {
+  const currentPage = Math.max(1, page);
+  const pageSize = Math.max(1, size);
+  const now = new Date().toISOString();
+
+  // 1. Query challenges whose end_at is in the past, ordered by most recently ended first
+  const { data: challenges, error: cError } = await supabase
+    .from(CHALLENGES_TABLE)
+    .select('*')
+    .lt('end_at', now)
+    .order('end_at', { ascending: false });
+
+  if (cError) throw cError;
+  if (!challenges || challenges.length === 0) {
+    return { page: currentPage, size: pageSize, total: 0, hasMore: false, data: [] };
+  }
+
+  const total = challenges.length;
+  const start = (currentPage - 1) * pageSize;
+  const pageChallenges = challenges.slice(start, start + pageSize);
+  const hasMore = currentPage * pageSize < total;
+
+  if (pageChallenges.length === 0) {
+    return { page: currentPage, size: pageSize, total, hasMore: false, data: [] };
+  }
+
+  const pageChallengeIds = pageChallenges.map((c) => c.id);
+
+  // 2. If userId is provided, get user's participations for these challenges
+  let partMap = new Map<string, { joined: boolean; joinedAt?: string; claimedAt?: string | null }>();
+  if (userId) {
+    const { data: participations } = await supabase
+      .from(PARTICIPANTS_TABLE)
+      .select('challenge_id, joined_at, claimed_at')
+      .eq('user_id', userId)
+      .in('challenge_id', pageChallengeIds)
+      .is('left_at', null);
+
+    for (const p of participations ?? []) {
+      partMap.set(p.challenge_id, {
+        joined: true,
+        joinedAt: p.joined_at,
+        claimedAt: p.claimed_at,
+      });
+    }
+  }
+
+  // 3. Resolve clubs for host_club_id
+  const clubsMap = await fetchClubsMap(pageChallenges.map((c) => c.host_club_id));
+
+  // 4. Get participant counts
+  const countPromises = pageChallenges.map((c) => getParticipantsCount(c.id));
+  const counts = await Promise.all(countPromises);
+
+  // 5. If user joined any of these, compute their progress too
+  const progressPromises = pageChallenges.map((c) => {
+    const part = partMap.get(c.id);
+    if (userId && part?.joined) {
+      return computeProgress(userId, c as ChallengeRow, part.joinedAt);
+    }
+    return Promise.resolve(undefined);
+  });
+  const progressResults = await Promise.all(progressPromises);
+
+  const data = pageChallenges.map((c, i) => {
+    const part = partMap.get(c.id);
+    return mapChallengeRow(
+      c as ChallengeRow,
+      counts[i],
+      part ?? { joined: false },
+      progressResults[i],
+      clubsMap.get(c.host_club_id)
+    );
+  });
+
+  return {
+    page: currentPage,
+    size: pageSize,
+    total,
+    hasMore,
+    data,
+  };
 }
 
 export interface ClubChallengesOptions {
@@ -382,7 +521,7 @@ export async function getChallengesByClubId(
     const sanitizedTag = clubId.replace(/^@/, '');
     const { data: club } = await supabase
       .from(CLUBS_TABLE)
-      .select('id, name, profile_image_url')
+      .select('id, name, profile_image_url, theme')
       .eq('tag', sanitizedTag)
       .maybeSingle();
     if (!club) {
@@ -392,7 +531,7 @@ export async function getChallengesByClubId(
   } else {
     const { data: club } = await supabase
       .from(CLUBS_TABLE)
-      .select('id, name, profile_image_url')
+      .select('id, name, profile_image_url, theme')
       .eq('id', clubId)
       .maybeSingle();
     if (!club) {
@@ -494,7 +633,7 @@ export async function getChallengeById(
   if (challenge.host_club_id) {
     const { data: club } = await supabase
       .from(CLUBS_TABLE)
-      .select('id, name, profile_image_url')
+      .select('id, name, profile_image_url, theme')
       .eq('id', challenge.host_club_id)
       .maybeSingle();
     if (club) {
@@ -611,7 +750,8 @@ export async function leaveChallenge(
 export async function getLeaderboard(
   challengeId: string,
   page: number = 0,
-  size: number = 20
+  size: number = 20,
+  currentUserId?: string
 ): Promise<LeaderboardResponse> {
   // 1. Get challenge dates
   const { data: challenge, error: cError } = await supabase
@@ -636,7 +776,7 @@ export async function getLeaderboard(
 
   if (pError) throw pError;
   if (!participants || participants.length === 0) {
-    return { page, size, total: 0, data: [] };
+    return { page, size, total: 0, currentUser: null, data: [] };
   }
 
   const participantIds = participants.map((p) => p.user_id);
@@ -678,8 +818,29 @@ export async function getLeaderboard(
   const start = page * size;
   const pageData = ranked.slice(start, start + size);
 
-  // 4. Fetch profiles for the page
-  const profileMap = await fetchProfilesMap(pageData.map((r) => r.userId));
+  // 4. Find currentUser ranking object (if authenticated and participant with progress)
+  let currentUser: LeaderboardEntry | null = null;
+  const userIndex = currentUserId ? ranked.findIndex((r) => r.userId === currentUserId) : -1;
+  const hasUserProgress = userIndex !== -1 && ranked[userIndex].steps > 0;
+
+  // 5. Fetch profiles for page + current user (if needed)
+  const profileIdsToFetch = [...pageData.map((r) => r.userId)];
+  if (currentUserId && hasUserProgress && !profileIdsToFetch.includes(currentUserId)) {
+    profileIdsToFetch.push(currentUserId);
+  }
+
+  const profileMap = await fetchProfilesMap(profileIdsToFetch);
+
+  if (currentUserId && hasUserProgress) {
+    const userRank = userIndex + 1;
+    const userSteps = ranked[userIndex].steps;
+    currentUser = {
+      rank: userRank,
+      user: mapProfileToUser(profileMap.get(currentUserId), currentUserId),
+      steps: userSteps,
+      score: formatStepsAsScore(userSteps),
+    };
+  }
 
   const entries: LeaderboardEntry[] = pageData.map((r, i) => ({
     rank: start + i + 1,
@@ -688,7 +849,7 @@ export async function getLeaderboard(
     score: formatStepsAsScore(r.steps),
   }));
 
-  return { page, size, total, data: entries };
+  return { page, size, total, currentUser, data: entries };
 }
 
 /**
@@ -780,14 +941,14 @@ export async function createChallenge(
       const sanitizedTag = input.hostClubId.replace(/^@/, '');
       const { data } = await supabase
         .from(CLUBS_TABLE)
-        .select('id, name, profile_image_url')
+        .select('id, name, profile_image_url, theme')
         .eq('tag', sanitizedTag)
         .maybeSingle();
       club = data;
     } else {
       const { data } = await supabase
         .from(CLUBS_TABLE)
-        .select('id, name, profile_image_url')
+        .select('id, name, profile_image_url, theme')
         .eq('id', input.hostClubId)
         .maybeSingle();
       club = data;
