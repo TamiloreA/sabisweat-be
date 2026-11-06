@@ -139,6 +139,22 @@ async function uploadImages(postId: string, imagesBase64: string[]): Promise<str
   return urls;
 }
 
+function resolvePostTags(post: any): { tag: string; tags: string[] } {
+  let tags: string[] = [];
+  if (Array.isArray(post.tags) && post.tags.length > 0) {
+    tags = post.tags;
+  } else if (typeof post.tag === 'string' && post.tag.trim()) {
+    tags = post.tag.split(',').map((t: string) => t.trim()).filter(Boolean);
+  }
+  if (tags.length === 0) {
+    tags = ['General'];
+  }
+  return {
+    tag: tags[0] || 'General',
+    tags,
+  };
+}
+
 export async function createPost(input: CreatePostInput, author: AuthClaims): Promise<CreatePostResult> {
   await ensureProfile(author);
 
@@ -161,21 +177,45 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
 
   const imagesUrl = [...(input.imagesUrl ?? []).filter(Boolean), ...uploadedUrls];
 
-  const { data, error } = await supabase
+  let tagsList: string[] = [];
+  if (Array.isArray(input.tags)) {
+    tagsList = input.tags.filter(Boolean);
+  } else if (Array.isArray(input.tag)) {
+    tagsList = input.tag.filter(Boolean);
+  } else if (typeof input.tag === 'string' && input.tag.trim()) {
+    tagsList = [input.tag.trim()];
+  }
+  if (tagsList.length === 0) {
+    tagsList = ['General'];
+  }
+  const primaryTag = tagsList[0];
+
+  const basePayload = {
+    id: postId,
+    title: input.title?.trim() || '',
+    description: input.description,
+    tag: primaryTag,
+    images_url: imagesUrl,
+    author_id: author.sub,
+    club_id: input.clubId ?? null,
+  };
+
+  let insertRes = await supabase
     .from(POSTS_TABLE)
-    .insert({
-      id: postId,
-      title: input.title,
-      description: input.description,
-      tag: input.tag ?? 'General',
-      images_url: imagesUrl,
-      author_id: author.sub,
-      club_id: input.clubId ?? null,
-    })
+    .insert({ ...basePayload, tags: tagsList })
     .select()
     .single();
 
-  if (error) throw error;
+  if (insertRes.error && insertRes.error.message?.includes('tags')) {
+    insertRes = await supabase
+      .from(POSTS_TABLE)
+      .insert(basePayload)
+      .select()
+      .single();
+  }
+
+  if (insertRes.error) throw insertRes.error;
+  const data = insertRes.data;
 
   if (input.pollOptions && input.pollOptions.length > 0) {
     const optionsToInsert = input.pollOptions.map((text) => ({
@@ -186,11 +226,13 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
     if (pollError) throw pollError;
   }
 
+  const resolved = resolvePostTags(data);
   return {
     id: data.id,
-    title: data.title,
+    title: data.title || undefined,
     description: data.description,
-    tag: data.tag,
+    tag: resolved.tag,
+    tags: resolved.tags,
     imagesUrl: data.images_url ?? [],
     clubId: data.club_id,
     createdAt: data.created_at,
@@ -231,22 +273,26 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
     commentCounts.set(comment.post_id, (commentCounts.get(comment.post_id) ?? 0) + 1);
   }
 
-  const feed: FeedPost[] = posts.map((post: any) => ({
-    id: post.id,
-    title: post.title,
-    description: post.description,
-    tag: post.tag,
-    imagesUrl: post.images_url ?? [],
-    counts: {
-      likes: likeCounts.get(post.id) ?? 0,
-      comments: commentCounts.get(post.id) ?? 0,
-      shares: 0,
-    },
-    likedByMe: userId ? likedPostIds.has(post.id) : false,
-    author: mapAuthor(profileMap.get(post.author_id), post.author_id),
-    clubId: post.club_id,
-    createdAt: post.created_at,
-  }));
+  const feed: FeedPost[] = posts.map((post: any) => {
+    const resolved = resolvePostTags(post);
+    return {
+      id: post.id,
+      title: post.title || undefined,
+      description: post.description,
+      tag: resolved.tag,
+      tags: resolved.tags,
+      imagesUrl: post.images_url ?? [],
+      counts: {
+        likes: likeCounts.get(post.id) ?? 0,
+        comments: commentCounts.get(post.id) ?? 0,
+        shares: 0,
+      },
+      likedByMe: userId ? likedPostIds.has(post.id) : false,
+      author: mapAuthor(profileMap.get(post.author_id), post.author_id),
+      clubId: post.club_id,
+      createdAt: post.created_at,
+    };
+  });
 
   return { data: feed, page, size };
 }
@@ -327,11 +373,13 @@ export async function getClubPosts(clubId: string, page: number, size: number, u
       };
     });
 
+    const resolved = resolvePostTags(post);
     return {
       id: post.id,
-      title: post.title,
+      title: post.title || undefined,
       description: post.description,
-      tag: post.tag,
+      tag: resolved.tag,
+      tags: resolved.tags,
       imagesUrl: post.images_url ?? [],
       counts: {
         likes: likeCounts.get(post.id) ?? 0,
@@ -657,11 +705,13 @@ export async function getPostById(postId: string, userId?: string): Promise<Feed
 
   const likes = likesRes.data ?? [];
 
+  const resolved = resolvePostTags(post);
   return {
     id: post.id,
-    title: post.title,
+    title: post.title || undefined,
     description: post.description,
-    tag: post.tag,
+    tag: resolved.tag,
+    tags: resolved.tags,
     imagesUrl: post.images_url ?? [],
     counts: {
       likes: likes.length,
@@ -1508,11 +1558,13 @@ export async function getMyPosts(
       });
     }
 
+    const resolved = resolvePostTags(post);
     return {
       id: post.id,
-      title: post.title,
+      title: post.title || undefined,
       description: post.description,
-      tag: post.tag,
+      tag: resolved.tag,
+      tags: resolved.tags,
       imagesUrl: post.images_url ?? [],
       counts: {
         likes: likeCounts.get(post.id) ?? 0,

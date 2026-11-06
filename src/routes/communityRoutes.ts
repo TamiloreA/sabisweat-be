@@ -56,14 +56,27 @@ router.get('/feeds', requireAuth, getFeed);
  *         application/json:
  *           schema:
  *             type: object
- *             required: [title, description]
+ *             required: [description]
  *             properties:
  *               title:
  *                 type: string
+ *                 description: "Optional post title"
+ *                 example: "Morning Run"
  *               description:
  *                 type: string
+ *                 example: "Great 5km run this morning!"
  *               tag:
- *                 type: string
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: "List of tags (e.g. ['General', 'Fitness']) or single string"
+ *                 example: ["General", "Fitness"]
+ *               tags:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: "List of tags (alias for tag)"
+ *                 example: ["General", "Fitness"]
  *               imagesUrl:
  *                 type: array
  *                 items:
@@ -72,9 +85,13 @@ router.get('/feeds', requireAuth, getFeed);
  *                 type: array
  *                 items:
  *                   type: string
- *                 description: Base64 strings or data URLs (data:image/jpeg;base64,...)
+ *                 description: "Base64 strings or data URLs (data:image/jpeg;base64,...)"
  *               clubId:
  *                 type: string
+ *               pollOptions:
+ *                 type: array
+ *                 items:
+ *                   type: string
  *     responses:
  *       201:
  *         description: Post created

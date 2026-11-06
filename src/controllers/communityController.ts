@@ -15,23 +15,30 @@ export const getFeed = async (req: Request, res: Response, next: NextFunction) =
 
 export const createPost = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { title, description, tag, imagesUrl, imagesBase64, clubId } = req.body ?? {};
-
-    if (typeof title !== 'string' || !title.trim()) {
-      res.status(400).json({ success: false, message: 'title is required' });
-      return;
-    }
+    const { title, description, tag, tags, imagesUrl, imagesBase64, clubId } = req.body ?? {};
 
     if (typeof description !== 'string' || !description.trim()) {
       res.status(400).json({ success: false, message: 'description is required' });
       return;
     }
 
+    let parsedTags: string[] = [];
+    if (Array.isArray(tags)) {
+      parsedTags = tags.map((t: any) => String(t).trim()).filter(Boolean);
+    } else if (Array.isArray(tag)) {
+      parsedTags = tag.map((t: any) => String(t).trim()).filter(Boolean);
+    } else if (typeof tags === 'string' && tags.trim()) {
+      parsedTags = [tags.trim()];
+    } else if (typeof tag === 'string' && tag.trim()) {
+      parsedTags = [tag.trim()];
+    }
+
     const post = await communityService.createPost(
       {
-        title: title.trim(),
+        title: typeof title === 'string' && title.trim() ? title.trim() : undefined,
         description: description.trim(),
-        tag: typeof tag === 'string' && tag.trim() ? tag.trim() : undefined,
+        tag: parsedTags.length > 0 ? parsedTags : undefined,
+        tags: parsedTags.length > 0 ? parsedTags : undefined,
         imagesUrl: Array.isArray(imagesUrl) ? imagesUrl : undefined,
         imagesBase64: Array.isArray(imagesBase64) ? imagesBase64 : undefined,
         clubId: typeof clubId === 'string' && clubId.trim() ? clubId.trim() : undefined,

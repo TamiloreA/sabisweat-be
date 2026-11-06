@@ -45,9 +45,10 @@ export interface CommunityPollResult {
 
 export interface FeedPost {
   id: string;
-  title: string;
+  title?: string;
   description: string;
   tag: string;
+  tags?: string[];
   imagesUrl: string[];
   counts: PostCounts;
   likedByMe: boolean;
@@ -72,9 +73,10 @@ export interface MyPostsResult {
 
 
 export interface CreatePostInput {
-  title: string;
+  title?: string;
   description: string;
-  tag?: string;
+  tag?: string | string[];
+  tags?: string[];
   imagesUrl?: string[];
   imagesBase64?: string[];
   clubId?: string;
@@ -83,9 +85,10 @@ export interface CreatePostInput {
 
 export interface CreatePostResult {
   id: string;
-  title: string;
+  title?: string;
   description: string;
   tag: string;
+  tags?: string[];
   imagesUrl: string[];
   clubId: string | null;
   createdAt: string;
