@@ -80,4 +80,18 @@ describe('Community Posts Schema & Payload Contracts', () => {
     expect(feedPost.tag).toBe('Running');
     expect(feedPost.tags).toEqual(['Running', 'Cardio']);
   });
+
+  it('validates FeedPost and CreatePostResult when post has no tags and no title', () => {
+    const postWithoutTagsOrTitle: CreatePostResult = {
+      id: 'd9b1a134-2e91-49b8-a764-7bfb94d13e22',
+      description: 'Quick post without title or tag',
+      imagesUrl: [],
+      clubId: null,
+      createdAt: new Date().toISOString(),
+    };
+
+    expect(postWithoutTagsOrTitle.title).toBeUndefined();
+    expect(postWithoutTagsOrTitle.tag).toBeUndefined();
+    expect(postWithoutTagsOrTitle.tags).toBeUndefined();
+  });
 });

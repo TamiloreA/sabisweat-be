@@ -47,7 +47,7 @@ export interface FeedPost {
   id: string;
   title?: string;
   description: string;
-  tag: string;
+  tag?: string;
   tags?: string[];
   imagesUrl: string[];
   counts: PostCounts;
@@ -87,7 +87,7 @@ export interface CreatePostResult {
   id: string;
   title?: string;
   description: string;
-  tag: string;
+  tag?: string;
   tags?: string[];
   imagesUrl: string[];
   clubId: string | null;

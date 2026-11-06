@@ -139,19 +139,16 @@ async function uploadImages(postId: string, imagesBase64: string[]): Promise<str
   return urls;
 }
 
-function resolvePostTags(post: any): { tag: string; tags: string[] } {
+function resolvePostTags(post: any): { tag?: string; tags?: string[] } {
   let tags: string[] = [];
   if (Array.isArray(post.tags) && post.tags.length > 0) {
-    tags = post.tags;
+    tags = post.tags.map((t: any) => String(t).trim()).filter(Boolean);
   } else if (typeof post.tag === 'string' && post.tag.trim()) {
     tags = post.tag.split(',').map((t: string) => t.trim()).filter(Boolean);
   }
-  if (tags.length === 0) {
-    tags = ['General'];
-  }
   return {
-    tag: tags[0] || 'General',
-    tags,
+    tag: tags[0] || undefined,
+    tags: tags.length > 0 ? tags : undefined,
   };
 }
 
@@ -179,16 +176,15 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
 
   let tagsList: string[] = [];
   if (Array.isArray(input.tags)) {
-    tagsList = input.tags.filter(Boolean);
+    tagsList = input.tags.map((t: any) => String(t).trim()).filter(Boolean);
   } else if (Array.isArray(input.tag)) {
-    tagsList = input.tag.filter(Boolean);
+    tagsList = input.tag.map((t: any) => String(t).trim()).filter(Boolean);
   } else if (typeof input.tag === 'string' && input.tag.trim()) {
     tagsList = [input.tag.trim()];
+  } else if (typeof input.tags === 'string' && (input.tags as any).trim()) {
+    tagsList = [(input.tags as any).trim()];
   }
-  if (tagsList.length === 0) {
-    tagsList = ['General'];
-  }
-  const primaryTag = tagsList[0];
+  const primaryTag = tagsList[0] || '';
 
   const basePayload = {
     id: postId,
@@ -229,7 +225,7 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
   const resolved = resolvePostTags(data);
   return {
     id: data.id,
-    title: data.title || undefined,
+    title: data.title?.trim() || undefined,
     description: data.description,
     tag: resolved.tag,
     tags: resolved.tags,
