@@ -157,13 +157,13 @@ router.post('/', requireAuth, createChallenge);
  *         schema:
  *           type: integer
  *           default: 1
- *         description: Page number (1-based, default: 1)
+ *         description: "Page number (1-based, default: 1)"
  *       - in: query
  *         name: size
  *         schema:
  *           type: integer
  *           default: 10
- *         description: Items per page (default: 10)
+ *         description: "Items per page (default: 10)"
  *       - in: query
  *         name: limit
  *         schema:
@@ -195,13 +195,13 @@ router.get('/active', requireAuth, getActiveChallenges);
  *         schema:
  *           type: integer
  *           default: 1
- *         description: Page number (1-based, default: 1)
+ *         description: "Page number (1-based, default: 1)"
  *       - in: query
  *         name: size
  *         schema:
  *           type: integer
  *           default: 10
- *         description: Items per page (default: 10)
+ *         description: "Items per page (default: 10)"
  *       - in: query
  *         name: limit
  *         schema:
@@ -244,13 +244,13 @@ router.get('/available', requireAuth, getAvailableChallenges);
  *         schema:
  *           type: integer
  *           default: 1
- *         description: Page number (1-based, default: 1)
+ *         description: "Page number (1-based, default: 1)"
  *       - in: query
  *         name: size
  *         schema:
  *           type: integer
  *           default: 10
- *         description: Items per page (default: 10)
+ *         description: "Items per page (default: 10)"
  *       - in: query
  *         name: limit
  *         schema:
@@ -474,13 +474,13 @@ router.post('/:id/leave', requireAuth, leaveChallenge);
  *         schema:
  *           type: integer
  *           default: 0
- *         description: Page number (0-based, default: 0)
+ *         description: "Page number (0-based, default: 0)"
  *       - in: query
  *         name: size
  *         schema:
  *           type: integer
  *           default: 20
- *         description: Items per page (default: 20)
+ *         description: "Items per page (default: 20)"
  *     responses:
  *       200:
  *         description: Paginated leaderboard with currentUser rank and step counts

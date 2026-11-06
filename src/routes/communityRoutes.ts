@@ -356,13 +356,13 @@ router.get('/posts/:id', requireAuth, getPostById);
  *         schema:
  *           type: integer
  *           default: 1
- *         description: Page number (1-based, default: 1)
+ *         description: "Page number (1-based, default: 1)"
  *       - in: query
  *         name: size
  *         schema:
  *           type: integer
  *           default: 10
- *         description: Items per page (default: 10)
+ *         description: "Items per page (default: 10)"
  *       - in: query
  *         name: limit
  *         schema:
