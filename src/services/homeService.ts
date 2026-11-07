@@ -1,19 +1,23 @@
 import { supabase } from '../config/database';
 import { mergeWithDefaultPreferences } from '../models/userPreferencesModel';
+import { mapProfileToUserProfile } from './userService';
+import type { ProfileRow } from '../models/onboardingModel';
 
 export const getHomeSummary = async (userId: string, token: string) => {
   const today = new Date().toISOString().split('T')[0];
   
-  // 1. Fetch profile for step_goal and sabi_level and points and preferences
+  // 1. Fetch complete profile for user info, step_goal, and preferences
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('step_goal, sabi_level, points_balance, preferences')
+    .select('*')
     .eq('id', userId)
     .single();
 
-  if (profileError) {
+  if (profileError || !profile) {
     throw { status: 500, error: 'server_error', message: 'Failed to fetch profile' };
   }
+
+  const userProfile = mapProfileToUserProfile(profile as ProfileRow);
 
   // 2. Fetch today's steps
   const { data: dailySteps, error: stepsError } = await supabase
@@ -27,7 +31,7 @@ export const getHomeSummary = async (userId: string, token: string) => {
   const distanceTodayKm = dailySteps?.distance_km || 0;
   const stepGoal = profile.step_goal || 10000;
   
-  // 3. Fetch 7-day average steps (optional, simplified to just today for now to save query time, or we can query last 7 days)
+  // 3. Fetch 7-day average steps
   const { data: recentSteps } = await supabase
     .from('daily_steps')
     .select('steps')
@@ -54,14 +58,12 @@ export const getHomeSummary = async (userId: string, token: string) => {
   ];
 
   return {
+    ...userProfile,
     stepsToday,
     distanceTodayKm,
     stepGoal,
     progressPercent,
     dailyAvgSteps,
-    sabiLevel: profile.sabi_level || 'Beginner',
-    pointsBalance: profile.points_balance || 0,
-    preferences: mergeWithDefaultPreferences(profile.preferences),
-    todayFeedPreview
+    todayFeedPreview,
   };
 };

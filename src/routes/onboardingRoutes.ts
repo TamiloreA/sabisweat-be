@@ -66,7 +66,7 @@ router.get('/check-username/:username', checkUsername);
  *         application/json:
  *           schema:
  *             type: object
- *             required: [firstName, lastName, dob, gender, mainGoal, walkingFrequency, startingGoal, username, city, leaderboardVisible, sharingDefault]
+ *             required: [firstName, lastName, dob, gender, mainGoal, walkingFrequency, startingGoal, username, city]
  *             properties:
  *               firstName:
  *                 type: string
@@ -77,8 +77,12 @@ router.get('/check-username/:username', checkUsername);
  *                 format: date
  *               gender:
  *                 type: string
- *                 enum: [Female, Male, Non-binary, Prefer not to say]
- *                 example: Female
+ *                 enum: [Female, Male, Non-binary, Prefer not to say, Man, Woman]
+ *                 example: Man
+ *               movementRelationship:
+ *                 type: string
+ *                 enum: [NONE, POOR, OCCASIONAL, CONSISTENT]
+ *                 example: CONSISTENT
  *               referralCode:
  *                 type: string
  *               mainGoal:
@@ -89,16 +93,47 @@ router.get('/check-username/:username', checkUsername);
  *                 type: number
  *               username:
  *                 type: string
+ *               race:
+ *                 type: string
+ *                 example: "Black / African"
+ *               specificSubgroup:
+ *                 type: string
+ *                 example: "Nigerian"
  *               photoBase64:
  *                 type: string
+ *                 nullable: true
  *               avatarId:
  *                 type: string
+ *               country:
+ *                 type: string
+ *                 example: "United Kingdom"
+ *               region:
+ *                 type: string
+ *                 example: "London"
  *               city:
  *                 type: string
+ *                 example: "London"
+ *               preferences:
+ *                 type: object
+ *                 properties:
+ *                   distanceUnit:
+ *                     type: string
+ *                     enum: [Kilometres, Miles]
+ *                     example: Miles
+ *                   energyUnit:
+ *                     type: string
+ *                     enum: [Calories, Kilojoules]
+ *                     example: Calories
+ *                   startOfWeek:
+ *                     type: string
+ *                     enum: [Saturday, Sunday, Monday]
+ *                     example: Sunday
  *               leaderboardVisible:
  *                 type: boolean
+ *                 default: true
  *               sharingDefault:
  *                 type: boolean
+ *                 default: true
  *     responses:
  *       200:
  *         description: Onboarding completed successfully
@@ -130,8 +165,15 @@ router.post('/complete', completeOnboarding);
  *                 type: string
  *               gender:
  *                 type: string
- *                 enum: [Female, Male, Non-binary, Prefer not to say]
+ *                 enum: [Female, Male, Non-binary, Prefer not to say, Man, Woman]
  *                 example: Female
+ *               movementRelationship:
+ *                 type: string
+ *                 enum: [NONE, POOR, OCCASIONAL, CONSISTENT]
+ *               race:
+ *                 type: string
+ *               specificSubgroup:
+ *                 type: string
  *               region:
  *                 type: string
  *               country:

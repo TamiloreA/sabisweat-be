@@ -101,3 +101,35 @@ export const updatePreferences = async (req: AuthenticatedRequest, res: Response
     next(error);
   }
 };
+
+/**
+ * GET /users/:id
+ * Returns user profile by ID.
+ */
+export const getUserById = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      res.status(400).json({ status: 'error', success: false, error: 'validation_error', message: 'User ID is required' });
+      return;
+    }
+
+    const profile = await userService.getUserById(id);
+    res.status(200).json({
+      status: 'success',
+      success: true,
+      data: profile,
+    });
+  } catch (error: any) {
+    if (error.status) {
+      res.status(error.status).json({
+        status: 'error',
+        success: false,
+        error: error.error || 'error',
+        message: error.message,
+      });
+      return;
+    }
+    next(error);
+  }
+};

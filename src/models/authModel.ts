@@ -20,7 +20,12 @@ export interface AuthUser {
   avatarId: string | null;
   hasPassword: boolean;
   onboardingStatus: OnboardingStatus;
+  country: string | null;
+  region: string | null;
   city: string | null;
+  movementRelationship: string | null;
+  race: string | null;
+  specificSubgroup: string | null;
   referralCode: string | null;
   gender: string | null;
   dob: string | null;

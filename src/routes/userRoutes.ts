@@ -124,4 +124,27 @@ router.patch('/me', userController.updateMe);
  */
 router.patch('/me/preferences', userController.updatePreferences);
 
+/**
+ * @openapi
+ * /users/{id}:
+ *   get:
+ *     summary: Get user profile by user ID
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: User ID (UUID)
+ *     responses:
+ *       200:
+ *         description: User profile
+ *       404:
+ *         description: User not found
+ */
+router.get('/:id', userController.getUserById);
+
 export default router;

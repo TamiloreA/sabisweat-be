@@ -34,6 +34,7 @@ export interface WeeklyReportReportingPeriod {
   weekEndDate: string;
   isCurrentWeek: boolean;
   daysElapsed: number;
+  startOfWeek?: string;
 }
 
 export interface WeeklyReportSummary {
@@ -44,6 +45,7 @@ export interface WeeklyReportSummary {
   daysGoalAchieved: number;
   distanceMeasuredIn?: string;
   energyMeasuredIn?: string;
+  startOfWeek?: string;
 }
 
 export interface WeeklyReportComparison {

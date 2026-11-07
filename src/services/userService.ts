@@ -26,21 +26,26 @@ export function mapProfileToUserProfile(row: ProfileRow): AuthUser {
     username: row.username,
     firstName: row.first_name,
     lastName: row.last_name,
+    gender: row.gender || normalizeGender(row.gender) || null,
+    dob: row.date_of_birth,
+    avatarId: row.avatar_id,
     avatarUrl: row.photo_url,
     photoUrl: row.photo_url,
     photoBase64: row.photo_base64,
-    avatarId: row.avatar_id,
+    country: row.country || null,
+    region: row.region || null,
+    city: row.city || null,
+    movementRelationship: row.movement_relationship || null,
+    race: row.race || null,
+    specificSubgroup: row.specific_subgroup || null,
+    referralCode: row.referral_code,
+    preferences: mergeWithDefaultPreferences(row.preferences),
     hasPassword: row.has_password,
     onboardingStatus: row.onboarding_status as any,
-    city: row.city,
-    referralCode: row.referral_code,
-    gender: normalizeGender(row.gender) || row.gender,
-    dob: row.date_of_birth,
-    sabiLevel: row.sabi_level as any,
-    level: row.sabi_level as any,
+    sabiLevel: (row.sabi_level as any) || 'Starter',
+    level: (row.sabi_level as any) || 'Starter',
     stepsCount: row.steps_count || 0,
     pointsBalance: row.points_balance || 0,
-    preferences: mergeWithDefaultPreferences(row.preferences),
     finishedOnboardedAt: row.finished_onboarded_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -59,6 +64,23 @@ export async function getUserProfile(userId: string): Promise<AuthUser> {
 
   if (error || !profile) {
     throw { status: 404, error: 'not_found', message: 'User profile not found' };
+  }
+
+  return mapProfileToUserProfile(profile as ProfileRow);
+}
+
+/**
+ * Fetch user profile by ID (for GET /users/:id).
+ */
+export async function getUserById(userId: string): Promise<AuthUser> {
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
+
+  if (error || !profile) {
+    throw { status: 404, error: 'not_found', message: 'User not found' };
   }
 
   return mapProfileToUserProfile(profile as ProfileRow);
@@ -143,13 +165,30 @@ export async function updateUserProfile(userId: string, body: any): Promise<Auth
   if (body.bio !== undefined) profileUpdates.bio = body.bio !== null ? String(body.bio).trim() : null;
   if (body.region !== undefined) profileUpdates.region = body.region !== null ? String(body.region).trim() : null;
   if (body.country !== undefined) profileUpdates.country = body.country !== null ? String(body.country).trim() : null;
+  if (body.race !== undefined) profileUpdates.race = body.race !== null ? String(body.race).trim() : null;
+  if (body.specificSubgroup !== undefined) profileUpdates.specific_subgroup = body.specificSubgroup !== null ? String(body.specificSubgroup).trim() : null;
+  if (body.movementRelationship !== undefined) {
+    if (body.movementRelationship === null) {
+      profileUpdates.movement_relationship = null;
+    } else {
+      const mr = String(body.movementRelationship).trim().toUpperCase();
+      if (!['NONE', 'POOR', 'OCCASIONAL', 'CONSISTENT'].includes(mr)) {
+        throw { status: 400, error: 'validation_error', message: 'movementRelationship must be NONE, POOR, OCCASIONAL, or CONSISTENT' };
+      }
+      profileUpdates.movement_relationship = mr;
+    }
+  }
   if (body.avatarId !== undefined) profileUpdates.avatar_id = body.avatarId !== null ? String(body.avatarId).trim() : null;
   if (body.photoBase64 !== undefined) profileUpdates.photo_base64 = body.photoBase64 !== null ? String(body.photoBase64) : null;
   if (body.gender !== undefined) {
     if (body.gender === null) {
       profileUpdates.gender = null;
     } else {
-      const normalizedGender = normalizeGender(body.gender);
+      const normalizedGender = normalizeGender(body.gender) || (
+        ['Female', 'Male', 'Non-binary', 'Prefer not to say', 'Woman', 'Man', 'Others'].includes(String(body.gender).trim())
+          ? String(body.gender).trim()
+          : null
+      );
       if (!normalizedGender) {
         throw { status: 400, error: 'validation_error', message: 'Invalid gender value' };
       }

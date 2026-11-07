@@ -21,6 +21,8 @@ import {
 } from '../src/models/userPreferencesModel';
 import * as userController from '../src/controllers/userController';
 import * as healthController from '../src/controllers/healthController';
+import * as onboardingController from '../src/controllers/onboardingController';
+import * as homeController from '../src/controllers/homeController';
 import * as userService from '../src/services/userService';
 import * as healthService from '../src/services/healthService';
 import * as homeService from '../src/services/homeService';
@@ -92,7 +94,12 @@ jest.mock('../src/config/database', () => {
     photo_url: 'https://example.com/avatar.jpg',
     photo_base64: null,
     avatar_id: null,
-    city: 'Lagos',
+    city: 'London',
+    country: 'United Kingdom',
+    region: 'London',
+    movement_relationship: 'CONSISTENT',
+    race: 'Black / African',
+    specific_subgroup: 'Nigerian',
     referral_code: 'SABI1234',
     gender: 'Female',
     date_of_birth: '1995-05-15',
@@ -118,6 +125,8 @@ jest.mock('../src/config/database', () => {
   const buildQuery = () => {
     let filterField: string | null = null;
     let filterValue: any = null;
+    let neqField: string | null = null;
+    let neqValue: any = null;
     let gteValue: any = null;
     let lteValue: any = null;
     let updatePayload: any = null;
@@ -127,6 +136,11 @@ jest.mock('../src/config/database', () => {
       eq: (field: string, val: any) => {
         filterField = field;
         filterValue = val;
+        return builder;
+      },
+      neq: (field: string, val: any) => {
+        neqField = field;
+        neqValue = val;
         return builder;
       },
       gte: (_field: string, val: any) => {
@@ -145,6 +159,10 @@ jest.mock('../src/config/database', () => {
         updatePayload = payload;
         return builder;
       },
+      upsert: (payload: any) => {
+        updatePayload = payload;
+        return builder;
+      },
       then: (resolve: any) => {
         if (updatePayload) {
           profileStore = { ...profileStore, ...updatePayload };
@@ -160,8 +178,18 @@ jest.mock('../src/config/database', () => {
           return resolve({ data: rows, error: null });
         }
 
-        if (filterField === 'id' && filterValue === profileStore.id) {
-          return resolve({ data: { ...profileStore }, error: null });
+        if (filterField === 'username') {
+          if (profileStore.username === filterValue && (!neqField || profileStore[neqField] !== neqValue)) {
+            return resolve({ data: { ...profileStore }, error: null });
+          }
+          return resolve({ data: null, error: null });
+        }
+
+        if (filterField === 'id') {
+          if (filterValue === profileStore.id) {
+            return resolve({ data: { ...profileStore }, error: null });
+          }
+          return resolve({ data: null, error: { message: 'Not found' } });
         }
 
         return resolve({ data: { ...profileStore }, error: null });
@@ -420,7 +448,10 @@ describe('Weekly Report Alignment & Omitted weekStartDate', () => {
     expect(res.body.error).toBe('validation_error');
   });
 
-  it('handles explicit weekStartDate and computes 7-day boundaries', async () => {
+  it('respects user startOfWeek when set to Saturday', async () => {
+    // Set startOfWeek to Saturday
+    await userService.updateUserPreferences('test-user-123', { startOfWeek: 'Saturday' });
+
     const req: any = {
       user: { id: 'test-user-123' },
       query: { weekStartDate: '2026-11-07', timezone: 'Africa/Lagos' },
@@ -433,5 +464,228 @@ describe('Weekly Report Alignment & Omitted weekStartDate', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.body.data.reportingPeriod.weekStartDate).toBe('2026-11-07');
     expect(res.body.data.reportingPeriod.weekEndDate).toBe('2026-11-13');
+    expect(res.body.data.reportingPeriod.startOfWeek).toBe('Saturday');
+  });
+
+  it('respects user startOfWeek when set to Sunday (Sunday through Saturday)', async () => {
+    // Update preference to Sunday via controller
+    const prefReq: any = {
+      user: { id: 'test-user-123' },
+      body: { startOfWeek: 'Sunday' },
+    };
+    const prefRes = createMockRes();
+    await userController.updatePreferences(prefReq, prefRes, jest.fn());
+    expect(prefRes.body.data.preferences.startOfWeek).toBe('Sunday');
+
+    // Subsequent call to getWeeklyReport must automatically use Sunday
+    const req: any = {
+      user: { id: 'test-user-123' },
+      query: { weekStartDate: '2026-11-07', timezone: 'Africa/Lagos' },
+    };
+    const res = createMockRes();
+    const next = jest.fn();
+
+    await healthController.getWeeklyReport(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.body.data.reportingPeriod.weekStartDate).toBe('2026-11-01');
+    expect(res.body.data.reportingPeriod.weekEndDate).toBe('2026-11-07');
+    expect(res.body.data.reportingPeriod.startOfWeek).toBe('Sunday');
+  });
+
+  it('respects user startOfWeek when set to Monday (Monday through Sunday)', async () => {
+    // Update preference to Monday
+    await userService.updateUserPreferences('test-user-123', { startOfWeek: 'Monday' });
+
+    const req: any = {
+      user: { id: 'test-user-123' },
+      query: { weekStartDate: '2026-11-07', timezone: 'Africa/Lagos' },
+    };
+    const res = createMockRes();
+    const next = jest.fn();
+
+    await healthController.getWeeklyReport(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.body.data.reportingPeriod.weekStartDate).toBe('2026-11-02');
+    expect(res.body.data.reportingPeriod.weekEndDate).toBe('2026-11-08');
+    expect(res.body.data.reportingPeriod.startOfWeek).toBe('Monday');
+  });
+});
+
+describe('Onboarding & User Profile Endpoints Alignment', () => {
+  it('POST /onboarding/complete accepts and saves all requested onboarding fields', async () => {
+    const onboardingPayload = {
+      firstName: 'Carrick',
+      lastName: 'Mikel',
+      dob: '2000-11-07',
+      gender: 'Man',
+      movementRelationship: 'CONSISTENT',
+      mainGoal: 'Build Consistency',
+      walkingFrequency: 'Daily',
+      startingGoal: 10000,
+      username: 'carrick',
+      race: 'Black / African',
+      specificSubgroup: 'Nigerian',
+      avatarId: 'male-30s-athletic-skyblue-buzzcutandshortbeard-deepgreensleevelesstop',
+      photoBase64: null,
+      country: 'United Kingdom',
+      region: 'London',
+      city: 'London',
+      referralCode: 'LQN9KAD7',
+      preferences: {
+        distanceUnit: 'Miles',
+        energyUnit: 'Calories',
+        startOfWeek: 'Sunday',
+      },
+      leaderboardVisible: true,
+      sharingDefault: true,
+    };
+
+    const req: any = {
+      user: { id: 'test-user-123', email: 'carrick@gmail.com' },
+      token: 'fake-jwt-token',
+      body: onboardingPayload,
+    };
+    const res = createMockRes();
+    const next = jest.fn();
+
+    await onboardingController.completeOnboarding(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.body.success).toBe(true);
+
+    const data = res.body.data;
+    expect(data.id).toBe('test-user-123');
+    expect(data.firstName).toBe('Carrick');
+    expect(data.lastName).toBe('Mikel');
+    expect(data.gender).toBe('Man');
+    expect(data.movementRelationship).toBe('CONSISTENT');
+    expect(data.race).toBe('Black / African');
+    expect(data.specificSubgroup).toBe('Nigerian');
+    expect(data.country).toBe('United Kingdom');
+    expect(data.region).toBe('London');
+    expect(data.city).toBe('London');
+    expect(data.preferences.distanceUnit).toBe('Miles');
+    expect(data.preferences.energyUnit).toBe('Calories');
+    expect(data.preferences.startOfWeek).toBe('Sunday');
+    expect(data.leaderboardVisible).toBe(true);
+    expect(data.sharingDefault).toBe(true);
+  });
+
+  it('POST /onboarding/complete defaults leaderboardVisible and sharingDefault to true when omitted', async () => {
+    const onboardingPayload = {
+      firstName: 'Carrick',
+      lastName: 'Mikel',
+      dob: '2000-11-07',
+      gender: 'Man',
+      movementRelationship: 'CONSISTENT',
+      mainGoal: 'Build Consistency',
+      walkingFrequency: 'Daily',
+      startingGoal: 10000,
+      username: 'carrick',
+      city: 'London',
+    };
+
+    const req: any = {
+      user: { id: 'test-user-123', email: 'carrick@gmail.com' },
+      token: 'fake-jwt-token',
+      body: onboardingPayload,
+    };
+    const res = createMockRes();
+    const next = jest.fn();
+
+    await onboardingController.completeOnboarding(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.body.data.leaderboardVisible).toBe(true);
+    expect(res.body.data.sharingDefault).toBe(true);
+  });
+
+  it('GET /users/me returns all profile fields in data', async () => {
+    const req: any = {
+      user: { id: 'test-user-123' },
+    };
+    const res = createMockRes();
+    const next = jest.fn();
+
+    await userController.getMe(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.body.status).toBe('success');
+    expect(res.body.data.id).toBe('test-user-123');
+    expect(res.body.data.country).toBe('United Kingdom');
+    expect(res.body.data.region).toBe('London');
+    expect(res.body.data.movementRelationship).toBe('CONSISTENT');
+    expect(res.body.data.race).toBe('Black / African');
+    expect(res.body.data.specificSubgroup).toBe('Nigerian');
+    expect(res.body.data.preferences).toBeDefined();
+    expect(res.body.data.preferences.distanceUnit).toBe('Miles');
+    expect(res.body.data.preferences.startOfWeek).toBe('Sunday');
+  });
+
+  it('GET /users/:id returns user profile by id in data', async () => {
+    const req: any = {
+      params: { id: 'test-user-123' },
+    };
+    const res = createMockRes();
+    const next = jest.fn();
+
+    await userController.getUserById(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.body.status).toBe('success');
+    expect(res.body.data.id).toBe('test-user-123');
+    expect(res.body.data.country).toBe('United Kingdom');
+    expect(res.body.data.region).toBe('London');
+    expect(res.body.data.movementRelationship).toBe('CONSISTENT');
+    expect(res.body.data.race).toBe('Black / African');
+    expect(res.body.data.specificSubgroup).toBe('Nigerian');
+    expect(res.body.data.preferences).toBeDefined();
+  });
+
+  it('GET /onboarding/me returns all profile fields in data', async () => {
+    const req: any = {
+      user: { id: 'test-user-123' },
+      token: 'fake-jwt-token',
+    };
+    const res = createMockRes();
+    const next = jest.fn();
+
+    await onboardingController.getProfile(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.id).toBe('test-user-123');
+    expect(res.body.data.country).toBe('United Kingdom');
+    expect(res.body.data.region).toBe('London');
+    expect(res.body.data.movementRelationship).toBe('CONSISTENT');
+    expect(res.body.data.race).toBe('Black / African');
+    expect(res.body.data.specificSubgroup).toBe('Nigerian');
+    expect(res.body.data.preferences).toBeDefined();
+  });
+
+  it('GET /home/summary returns profile fields and summary in data object', async () => {
+    const req: any = {
+      user: { id: 'test-user-123' },
+      token: 'fake-jwt-token',
+    };
+    const res = createMockRes();
+    const next = jest.fn();
+
+    await homeController.getHomeSummary(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.body.status).toBe('success');
+    expect(res.body.data).toBeDefined();
+    expect(res.body.data.id).toBe('test-user-123');
+    expect(res.body.data.country).toBe('United Kingdom');
+    expect(res.body.data.region).toBe('London');
+    expect(res.body.data.movementRelationship).toBe('CONSISTENT');
+    expect(res.body.data.race).toBe('Black / African');
+    expect(res.body.data.specificSubgroup).toBe('Nigerian');
+    expect(res.body.data.preferences).toBeDefined();
+    expect(res.body.data.stepsToday).toBeDefined();
+    expect(res.body.data.progressPercent).toBeDefined();
   });
 });

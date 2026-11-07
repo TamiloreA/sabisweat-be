@@ -28,14 +28,59 @@ export type MovementRelationship = 'NONE' | 'POOR' | 'OCCASIONAL' | 'CONSISTENT'
 export type WalkingFrequency = 'Rarely' | '1-2x weekly' | '3-5x weekly' | 'Daily';
 
 export interface OnboardingProfile {
+  id?: string;
   userId: string;
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  username?: string | null;
+  gender?: string | null;
+  dob?: string | null;
+  dateOfBirth?: string | null;
+  avatarId?: string | null;
+  avatarUrl?: string | null;
+  photoUrl?: string | null;
+  photoBase64?: string | null;
+  country?: string | null;
+  region?: string | null;
+  city?: string | null;
+  movementRelationship?: string | null;
+  race?: string | null;
+  specificSubgroup?: string | null;
   referralCode: string | null;
   onboardingStatus: OnboardingStatus;
   leaderboardVisible: boolean;
   sharingDefault: boolean;
   preferences?: UserPreferences;
+  sabiLevel?: string | null;
+  stepsCount?: number;
+  pointsBalance?: number;
+  streakCount?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CompleteOnboardingRequest {
+  firstName: string;
+  lastName: string;
+  dob: string;
+  gender: string;
+  movementRelationship?: MovementRelationship | string | null;
+  mainGoal: string;
+  walkingFrequency: string;
+  startingGoal: number;
+  username: string;
+  race?: string | null;
+  specificSubgroup?: string | null;
+  avatarId?: string | null;
+  photoBase64?: string | null;
+  country?: string | null;
+  region?: string | null;
+  city: string;
+  referralCode?: string | null;
+  preferences?: Partial<UserPreferences>;
+  leaderboardVisible?: boolean;
+  sharingDefault?: boolean;
 }
 
 export interface SetBasicIdentityRequest {

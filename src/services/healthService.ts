@@ -290,6 +290,8 @@ export const getWeeklyReport = async (
       err.status = 400;
       throw err;
     }
+    // Always align the week to the user's active startOfWeek preference
+    resolvedWeekStartDate = resolveWeekStartDate(resolvedWeekStartDate, userPrefs.startOfWeek);
   }
 
   const startDateObj = new Date(resolvedWeekStartDate + 'T00:00:00Z');
@@ -458,6 +460,7 @@ export const getWeeklyReport = async (
       weekEndDate,
       isCurrentWeek,
       daysElapsed,
+      startOfWeek: userPrefs.startOfWeek,
     },
     summary: {
       totalSteps,
@@ -467,6 +470,7 @@ export const getWeeklyReport = async (
       daysGoalAchieved,
       distanceMeasuredIn: userPrefs.distanceUnit,
       energyMeasuredIn: userPrefs.energyUnit,
+      startOfWeek: userPrefs.startOfWeek,
     },
     comparison: {
       stepsChangePercent,

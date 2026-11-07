@@ -14,7 +14,12 @@ export const getHomeSummary = async (req: AuthenticatedRequest, res: Response, n
     }
 
     const summary = await homeService.getHomeSummary(req.user.id, req.token!);
-    res.status(200).json(summary);
+    res.status(200).json({
+      status: 'success',
+      success: true,
+      data: summary,
+      ...summary,
+    });
   } catch (error: any) {
     if (error.status) {
       res.status(error.status).json({ success: false, error: error.error, message: error.message });
