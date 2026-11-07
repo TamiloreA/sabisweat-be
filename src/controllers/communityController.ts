@@ -301,6 +301,28 @@ export const requestJoinClub = async (req: Request, res: Response, next: NextFun
   }
 };
 
+export const cancelJoinRequest = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const clubId = req.params.clubId || req.params.id;
+    if (!clubId) {
+      res.status(400).json({ success: false, message: 'clubId is required' });
+      return;
+    }
+    const result = await communityService.cancelJoinRequest(clubId, req.user!.id);
+    res.status(200).json({
+      success: true,
+      message: 'Club join request cancelled successfully',
+      data: result,
+    });
+  } catch (error: any) {
+    if (error.statusCode) {
+      res.status(error.statusCode).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+};
+
 export const getClubJoinRequests = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requests = await communityService.getClubJoinRequests(req.params.id, req.user!.id);

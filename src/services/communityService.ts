@@ -20,6 +20,7 @@ import {
   ReportClubInput,
   MyPostsResult,
   PaginatedClubsResponse,
+  CancelJoinRequestResult,
 } from '../models/communityModel';
 
 const POSTS_TABLE = 'community_posts';
@@ -1149,6 +1150,62 @@ export async function requestJoinClub(clubId: string, userId: string): Promise<v
     });
 
   if (error) throw error;
+}
+
+export async function cancelJoinRequest(
+  clubId: string,
+  userId: string
+): Promise<CancelJoinRequestResult> {
+  // 1. Verify if user is already an active member of this club
+  const { data: existingMember } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('user_id')
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (existingMember) {
+    const error: any = new Error('User is already an active member of this club');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 2. Check if join request exists
+  const { data: existingRequest, error: fetchError } = await supabase
+    .from('club_join_requests')
+    .select('status')
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (fetchError) throw fetchError;
+
+  if (!existingRequest) {
+    const error: any = new Error('No active or pending join request exists for this user in this club');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (existingRequest.status !== 'pending') {
+    const error: any = new Error(`Join request has already been ${existingRequest.status}`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 3. Delete the pending request record
+  const { error: deleteError } = await supabase
+    .from('club_join_requests')
+    .delete()
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .eq('status', 'pending');
+
+  if (deleteError) throw deleteError;
+
+  return {
+    clubId,
+    joinStatus: 'none',
+  };
 }
 
 export async function getClubJoinRequests(clubId: string, adminUserId: string) {

@@ -262,5 +262,9 @@ export interface ResolveBulkJoinRequestsInput {
   userIds?: string[];
 }
 
+export interface CancelJoinRequestResult {
+  clubId: string;
+  joinStatus: 'none';
+}
 
 

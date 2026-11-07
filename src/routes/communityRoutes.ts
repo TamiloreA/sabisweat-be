@@ -1,5 +1,24 @@
 import { Router } from 'express';
-import { getFeed, createPost, likePost, unlikePost, addComment, getComments, getPostById, createClub, getClubs, getClubById, getClubPosts, voteOnPoll, getCommunityPollResult, createClubEvent, getClubEvents, rsvpClubEvent, requestJoinClub,  getClubJoinRequests,
+import {
+  getFeed,
+  createPost,
+  likePost,
+  unlikePost,
+  addComment,
+  getComments,
+  getPostById,
+  createClub,
+  getClubs,
+  getClubById,
+  getClubPosts,
+  voteOnPoll,
+  getCommunityPollResult,
+  createClubEvent,
+  getClubEvents,
+  rsvpClubEvent,
+  requestJoinClub,
+  cancelJoinRequest,
+  getClubJoinRequests,
   resolveJoinRequest,
   getClubMembers,
   updateClubDescription,
@@ -955,6 +974,55 @@ router.get('/posts/:id/poll/results', requireAuth, getCommunityPollResult);
  *         description: Join request submitted or accepted
  */
 router.post('/clubs/:id/join', requireAuth, requestJoinClub);
+
+/**
+ * @openapi
+ * /community/clubs/{clubId}/cancel-request:
+ *   post:
+ *     summary: Cancel a pending club join request
+ *     description: "Allows an authenticated user to cancel their pending join request to a club before an admin acts on it."
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: clubId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: "Club UUID"
+ *     responses:
+ *       200:
+ *         description: "Club join request cancelled successfully"
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Club join request cancelled successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     clubId:
+ *                       type: string
+ *                       example: "2a4ceadb-ba5b-4dd7-a47d-ffd094a8b632"
+ *                     joinStatus:
+ *                       type: string
+ *                       example: "none"
+ *       400:
+ *         description: "Request already resolved or user is already an active member"
+ *       401:
+ *         description: "Missing or invalid token"
+ *       404:
+ *         description: "No active or pending join request exists for this user in this club"
+ */
+router.post('/clubs/:clubId/cancel-request', requireAuth, cancelJoinRequest);
+router.post('/clubs/:id/cancel-request', requireAuth, cancelJoinRequest);
 
 /**
  * @openapi
