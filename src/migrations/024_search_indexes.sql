@@ -3,14 +3,18 @@
 -- PostgreSQL Full-Text Search (tsvector), Trigram Similarity (pg_trgm), Unaccent
 -- ============================================================
 
+-- Ensure search_path includes both public and extensions schema (Supabase default)
+SET search_path TO public, extensions;
+
 -- 1. Extensions
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE EXTENSION IF NOT EXISTS unaccent;
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA extensions;
 
 -- 2. Immutable wrapper function for unaccent
--- PostgreSQL marks unaccent() as STABLE because it relies on dictionary files.
+-- In PostgreSQL, unaccent() is marked STABLE because it relies on dictionary files.
 -- Since PostgreSQL requires functions in index expressions to be IMMUTABLE (ERROR: 42P17),
--- this immutable wrapper function satisfies that requirement.
+-- and Supabase places extensions in the 'extensions' schema (ERROR: 42883),
+-- this schema-qualified immutable wrapper function resolves both issues.
 CREATE OR REPLACE FUNCTION public.immutable_unaccent(text)
   RETURNS text
   LANGUAGE sql
@@ -18,8 +22,10 @@ CREATE OR REPLACE FUNCTION public.immutable_unaccent(text)
   PARALLEL SAFE
   STRICT
 AS $$
-  SELECT unaccent($1);
+  SELECT extensions.unaccent('extensions.unaccent'::regdictionary, $1);
 $$;
+
+GRANT EXECUTE ON FUNCTION public.immutable_unaccent(text) TO anon, authenticated, service_role;
 
 -- 3. Challenges Search Indexes
 -- GIN Index for Full-Text Search on Challenges (title, subtitle, description)
