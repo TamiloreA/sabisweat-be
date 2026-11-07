@@ -15,8 +15,8 @@ const router = Router();
  * @openapi
  * /search:
  *   get:
- *     summary: Unified search across Challenges and Clubs
- *     description: Searches across challenges and clubs using PostgreSQL full-text search, trigram similarity, and location-based club ranking.
+ *     summary: Unified search across Challenges, Clubs, and Help FAQs
+ *     description: Searches across challenges, clubs, and help articles using PostgreSQL full-text search, trigram similarity, and location-based club ranking.
  *     tags: [Search]
  *     security:
  *       - bearerAuth: []
@@ -33,8 +33,8 @@ const router = Router();
  *         required: false
  *         schema:
  *           type: string
- *         description: "Resource types to search (comma-separated: challenges, clubs). Defaults to both."
- *         example: "challenges,clubs"
+ *         description: "Resource types to search (comma-separated: challenges, clubs, help). Defaults to all."
+ *         example: "challenges,clubs,help"
  *       - in: query
  *         name: limit
  *         required: false

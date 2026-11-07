@@ -5,9 +5,10 @@
  * accent insensitivity, location-based club ranking, pagination, and error handling.
  */
 
-import { unaccent, extractWords, trigramSimilarity, search } from '../src/services/searchService';
-import type { SearchResponse, SearchChallengeItem, SearchClubItem } from '../src/models/searchModel';
+import { unaccent, extractWords, trigramSimilarity, search, generateSnippet } from '../src/services/searchService';
+import type { SearchResponse, SearchChallengeItem, SearchClubItem, SearchHelpItem } from '../src/models/searchModel';
 import { searchRateLimiter } from '../src/middleware/rateLimiter';
+import { getPublishedFAQs } from '../src/services/supportService';
 
 // Mock supabase client for unit testing search logic
 jest.mock('../src/config/database', () => {
@@ -111,38 +112,77 @@ jest.mock('../src/config/database', () => {
     },
   ];
 
-  return {
-    supabase: {
-      from: jest.fn((table: string) => {
-        if (table === 'challenges') {
+    const mockFaqs = [
+      {
+        id: 'faq1',
+        question: 'How to create or join a Club',
+        answer: 'Learn how to request access or build your own community. Navigate to the Clubs tab, explore available clubs or tap Create Club to start your own.',
+        category: 'Clubs',
+        order: 1,
+        is_published: true,
+        url: '/help/how-to-join-a-club',
+        updated_at: '2026-11-01T12:00:00Z',
+      },
+      {
+        id: 'faq2',
+        question: 'How do I earn Sabi coins?',
+        answer: 'You earn Sabi coins by completing daily step goals, joining challenges, and participating in clubs.',
+        category: 'Rewards',
+        order: 2,
+        is_published: true,
+        url: '/help/how-to-earn-sabi-coins',
+        updated_at: '2026-11-01T12:00:00Z',
+      },
+      {
+        id: 'faq3_unpublished',
+        question: 'Internal admin secrets',
+        answer: 'Do not publish this',
+        category: 'Admin',
+        order: 99,
+        is_published: false,
+        updated_at: '2026-11-01T12:00:00Z',
+      },
+    ];
+
+    return {
+      supabase: {
+        from: jest.fn((table: string) => {
+          if (table === 'challenges') {
+            return {
+              select: jest.fn().mockReturnThis(),
+              gte: jest.fn().mockReturnThis(),
+              order: jest.fn().mockResolvedValue({ data: mockChallenges, error: null }),
+            };
+          }
+          if (table === 'clubs') {
+            return {
+              select: jest.fn().mockReturnThis(),
+              eq: jest.fn().mockReturnThis(),
+              order: jest.fn().mockResolvedValue({ data: mockClubs, error: null }),
+            };
+          }
+          if (table === 'faqs') {
+            return {
+              select: jest.fn().mockReturnThis(),
+              eq: jest.fn().mockReturnThis(),
+              order: jest.fn().mockResolvedValue({ data: mockFaqs, error: null }),
+            };
+          }
+          if (table === 'challenge_participants') {
+            return {
+              select: jest.fn().mockReturnThis(),
+              eq: jest.fn().mockReturnThis(),
+              is: jest.fn().mockResolvedValue({ count: 18, error: null }),
+            };
+          }
+          if (table === 'club_members') {
+            return {
+              select: jest.fn().mockReturnThis(),
+              eq: jest.fn().mockResolvedValue({ count: 250, error: null }),
+            };
+          }
           return {
             select: jest.fn().mockReturnThis(),
-            gte: jest.fn().mockReturnThis(),
-            order: jest.fn().mockResolvedValue({ data: mockChallenges, error: null }),
-          };
-        }
-        if (table === 'clubs') {
-          return {
-            select: jest.fn().mockReturnThis(),
-            eq: jest.fn().mockReturnThis(),
-            order: jest.fn().mockResolvedValue({ data: mockClubs, error: null }),
-          };
-        }
-        if (table === 'challenge_participants') {
-          return {
-            select: jest.fn().mockReturnThis(),
-            eq: jest.fn().mockReturnThis(),
-            is: jest.fn().mockResolvedValue({ count: 18, error: null }),
-          };
-        }
-        if (table === 'club_members') {
-          return {
-            select: jest.fn().mockReturnThis(),
-            eq: jest.fn().mockResolvedValue({ count: 250, error: null }),
-          };
-        }
-        return {
-          select: jest.fn().mockReturnThis(),
           order: jest.fn().mockResolvedValue({ data: [], error: null }),
         };
       }),
@@ -401,23 +441,78 @@ describe('Search Filter Engine - Unit Tests', () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         error: 'INVALID_TYPE',
-        message: 'Allowed types: challenges, clubs.',
+        message: 'Allowed types: challenges, clubs, help.',
       });
     });
 
     it('returns 200 with valid search response', async () => {
-      const req: any = { query: { q: 'running', types: 'challenges,clubs', limit: '10', offset: '0' } };
+      const req: any = { query: { q: 'running', types: 'challenges,clubs,help', limit: '10', offset: '0' } };
       const res = createMockRes();
       await searchCtrl(req, res);
       expect(res.status).toHaveBeenCalledWith(200);
       expect(res.json).toHaveBeenCalledWith(
         expect.objectContaining({
           query: 'running',
-          types: ['challenges', 'clubs'],
+          types: ['challenges', 'clubs', 'help'],
           results: expect.any(Object),
           meta: expect.objectContaining({ limit: 10, offset: 0 }),
         })
       );
+    });
+  });
+
+  describe('Help & Support Search & FAQs', () => {
+    it('generates clean snippets within 50 to 120 characters', () => {
+      const longText =
+        'Learn how to request access or build your own community. Navigate to the Clubs tab, explore available clubs or tap Create Club to start your own.';
+      const snippet = generateSnippet(longText, 100);
+      expect(snippet.length).toBeLessThanOrEqual(105);
+      expect(snippet.endsWith('...')).toBe(true);
+
+      const shortText = 'Short preview.';
+      expect(generateSnippet(shortText)).toBe('Short preview.');
+    });
+
+    it('searches Help FAQs when types=help is requested', async () => {
+      const response = await search({
+        q: 'Club',
+        types: ['help'],
+        limit: 10,
+        offset: 0,
+      });
+
+      expect(response.types).toEqual(['help']);
+      expect(response.results.help).toBeDefined();
+      expect(response.results.challenges).toBeUndefined();
+      expect(response.results.clubs).toBeUndefined();
+
+      const items = response.results.help?.items || [];
+      expect(items.length).toBeGreaterThan(0);
+      const item: SearchHelpItem = items[0];
+      expect(item.type).toBe('help');
+      expect(item.title).toBe('How to create or join a Club');
+      expect(item.category).toBe('Clubs');
+      expect(item.url).toBe('/help/how-to-join-a-club');
+      expect(item.snippet).toBeDefined();
+    });
+
+    it('excludes unpublished FAQs from search results', async () => {
+      const response = await search({
+        q: 'Internal admin secrets',
+        types: ['help'],
+        limit: 10,
+        offset: 0,
+      });
+
+      const items = response.results.help?.items || [];
+      expect(items.some((i) => i.title.includes('admin secrets'))).toBe(false);
+    });
+
+    it('fetches published FAQs ordered by order in ascending order', async () => {
+      const faqs = await getPublishedFAQs();
+      expect(faqs.length).toBeGreaterThan(0);
+      expect(faqs.every((f) => f.is_published)).toBe(true);
+      expect(faqs[0].order).toBeLessThanOrEqual(faqs[1]?.order ?? 99);
     });
   });
 

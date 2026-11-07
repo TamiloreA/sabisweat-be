@@ -32,11 +32,12 @@ export async function search(req: Request, res: Response): Promise<void> {
 
     // 2. Validate and parse 'types' parameter
     const rawTypes = req.query.types;
-    let types: SearchResourceType[] = ['challenges', 'clubs'];
+    const defaultTypes: SearchResourceType[] = ['challenges', 'clubs', 'help'];
+    let types: SearchResourceType[] = defaultTypes;
 
     if (rawTypes !== undefined && rawTypes !== null) {
       if (typeof rawTypes !== 'string' || rawTypes.trim().length === 0) {
-        types = ['challenges', 'clubs'];
+        types = defaultTypes;
       } else {
         const splitTypes = rawTypes
           .split(',')
@@ -44,15 +45,15 @@ export async function search(req: Request, res: Response): Promise<void> {
           .filter(Boolean);
 
         if (splitTypes.length === 0) {
-          types = ['challenges', 'clubs'];
+          types = defaultTypes;
         } else {
-          const allowedTypes: SearchResourceType[] = ['challenges', 'clubs'];
+          const allowedTypes: SearchResourceType[] = ['challenges', 'clubs', 'help'];
           const isValid = splitTypes.every((t) => (allowedTypes as string[]).includes(t));
 
           if (!isValid) {
             res.status(400).json({
               error: 'INVALID_TYPE',
-              message: 'Allowed types: challenges, clubs.',
+              message: 'Allowed types: challenges, clubs, help.',
             });
             return;
           }

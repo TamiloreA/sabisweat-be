@@ -13,9 +13,12 @@ import type {
   SearchResults,
   SearchChallengeItem,
   SearchClubItem,
+  SearchHelpItem,
   SearchResultGroup,
   SearchResourceType,
 } from '../models/searchModel';
+import { getPublishedFAQs } from './supportService';
+import type { FAQItem } from '../models/supportModel';
 
 const CHALLENGES_TABLE = 'challenges';
 const CLUBS_TABLE = 'clubs';
@@ -82,6 +85,25 @@ export function trigramSimilarity(s1: string, s2: string): number {
 
   const union = tri1.size + tri2.size - intersection;
   return union === 0 ? 0 : intersection / union;
+}
+
+/**
+ * Generates a short plain-text preview of the answer (50–120 characters).
+ */
+export function generateSnippet(text: string, maxLength: number = 100): string {
+  if (!text) return '';
+  const clean = text
+    .replace(/<[^>]*>/g, '')
+    .replace(/[#*_`~\[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (clean.length <= maxLength) return clean;
+
+  const truncated = clean.slice(0, maxLength);
+  const lastSpace = truncated.lastIndexOf(' ');
+  const cutPoint = lastSpace > 40 ? lastSpace : maxLength;
+  return clean.slice(0, cutPoint).trim() + '...';
 }
 
 // ─── Challenge Scoring & Matching ───────────────────────────────
@@ -387,6 +409,99 @@ function scoreClub(
   return { item: club, score, matched };
 }
 
+// ─── Help & Support FAQ Scoring ─────────────────────────────────
+
+function scoreFaq(faq: FAQItem, query: string): ScoredItem<FAQItem> {
+  const normQ = normalizeText(query);
+  const qWords = extractWords(query);
+
+  const question = faq.question || '';
+  const answer = faq.answer || '';
+  const category = faq.category || '';
+
+  const normQuestion = normalizeText(question);
+  const normAnswer = normalizeText(answer);
+  const normCategory = normalizeText(category);
+
+  const questionWords = extractWords(question);
+  const answerWords = extractWords(answer);
+
+  let score = 0;
+  let matched = false;
+
+  // 1. Exact match on question (highest priority)
+  if (normQuestion === normQ) {
+    score += 1000;
+    matched = true;
+  }
+
+  // 2. Prefix match on question
+  if (normQuestion.startsWith(normQ)) {
+    score += 600;
+    matched = true;
+  } else if (questionWords.some((w) => w.startsWith(normQ))) {
+    score += 400;
+    matched = true;
+  }
+
+  // 3. Full-text / Word matching (prioritise question over answer)
+  for (const w of qWords) {
+    if (questionWords.includes(w)) {
+      score += 150;
+      matched = true;
+    } else if (questionWords.some((qw) => qw.startsWith(w))) {
+      score += 100;
+      matched = true;
+    }
+
+    if (answerWords.includes(w)) {
+      score += 50;
+      matched = true;
+    }
+
+    if (normCategory.includes(w)) {
+      score += 40;
+      matched = true;
+    }
+  }
+
+  // Substring matching
+  if (normQuestion.includes(normQ)) {
+    score += 120;
+    matched = true;
+  }
+  if (normAnswer.includes(normQ)) {
+    score += 30;
+    matched = true;
+  }
+
+  // 4. Fuzzy matching (Trigram similarity) for queries >= 4 chars
+  if (normQ.length >= 4) {
+    const simQuestion = trigramSimilarity(normQuestion, normQ);
+    const maxWordSim = questionWords.length
+      ? Math.max(...questionWords.map((w) => trigramSimilarity(w, normQ)))
+      : 0;
+    const bestSim = Math.max(simQuestion, maxWordSim);
+
+    if (bestSim >= 0.28) {
+      score += Math.round(bestSim * 80);
+      matched = true;
+    }
+  }
+
+  // 5. Order & Recency tiebreakers
+  score += Math.max(0, 10 - (faq.order || 0));
+
+  if (faq.updated_at) {
+    const timeMs = new Date(faq.updated_at).getTime();
+    if (!Number.isNaN(timeMs)) {
+      score += (timeMs / 1e12) * 0.01;
+    }
+  }
+
+  return { item: faq, score, matched };
+}
+
 // ─── Parallel Participant and Member Count Fetchers ─────────────
 
 async function getChallengeParticipantCount(challengeId: string): Promise<number> {
@@ -570,6 +685,38 @@ export async function search(params: SearchQueryParams): Promise<SearchResponse>
         });
 
         results.clubs = {
+          total,
+          items,
+        };
+      })()
+    );
+  }
+
+  // Search Help & Support FAQs if requested
+  if (types.includes('help')) {
+    searchTasks.push(
+      (async () => {
+        const faqs = await getPublishedFAQs();
+
+        // Score and filter matching FAQs
+        const scored = faqs
+          .map((faq) => scoreFaq(faq, q))
+          .filter((s) => s.matched)
+          .sort((a, b) => b.score - a.score);
+
+        const total = scored.length;
+        const pageItems = scored.slice(offset, offset + limit).map((s) => s.item);
+
+        const items: SearchHelpItem[] = pageItems.map((faq) => ({
+          id: faq.id,
+          type: 'help',
+          title: faq.question,
+          snippet: generateSnippet(faq.answer),
+          category: faq.category || 'General',
+          url: faq.url || undefined,
+        }));
+
+        results.help = {
           total,
           items,
         };
