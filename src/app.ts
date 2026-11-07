@@ -19,6 +19,7 @@ import achievementRoutes from './routes/achievementRoutes';
 import emailNotificationRoutes from './routes/emailNotificationRoutes';
 import notificationRoutes from './routes/notificationRoutes';
 import adminPushRoutes from './routes/adminPushRoutes';
+import searchRoutes from './routes/searchRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { apiRateLimiter } from './middleware/rateLimiter';
 
@@ -88,6 +89,10 @@ app.use('/api/v1/app-version', versionRoutes);
 // Achievements — mounted both at root and /api/v1
 app.use('/achievements', achievementRoutes);
 app.use('/api/v1/achievements', achievementRoutes);
+
+// Search — mounted both at root and /api/v1
+app.use('/search', searchRoutes);
+app.use('/api/v1/search', searchRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'SabiSweat API is running' });
