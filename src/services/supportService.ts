@@ -82,13 +82,16 @@ export async function getPublishedFAQs(): Promise<FAQItem[]> {
   try {
     const { data, error } = await supabase
       .from(FAQS_TABLE)
-      .select('*')
-      .eq('is_published', true)
-      .order('order', { ascending: true });
+      .select('*');
 
     if (error) {
-      // If table doesn't exist yet in Supabase schema cache, gracefully fall back to default FAQs
-      if (error.code === 'PGRST205' || error.message?.includes('schema cache')) {
+      // If table doesn't exist yet in Supabase schema cache or column issue, fall back to default FAQs
+      if (
+        error.code === 'PGRST205' ||
+        error.code === 'PGRST204' ||
+        error.message?.includes('schema cache') ||
+        error.message?.includes('column')
+      ) {
         return DEFAULT_FAQS.filter((f) => f.is_published);
       }
       throw error;
@@ -100,18 +103,19 @@ export async function getPublishedFAQs(): Promise<FAQItem[]> {
     }
 
     return rows
-      .filter((item: any) => item.is_published === true && item.deleted_at == null)
+      .filter((item: any) => item.is_published !== false && item.deleted_at == null)
       .map((item: any) => ({
-        id: item.id,
-        question: item.question,
-        answer: item.answer,
+        id: String(item.id),
+        question: item.question || '',
+        answer: item.answer || '',
         category: item.category || 'General',
-        order: item.order ?? 0,
-        is_published: item.is_published ?? true,
+        order: item.order ?? item.sort_order ?? item.display_order ?? 0,
+        is_published: item.is_published !== false,
         url: item.url || null,
         created_at: item.created_at,
         updated_at: item.updated_at || item.created_at || new Date().toISOString(),
-      }));
+      }))
+      .sort((a, b) => a.order - b.order);
   } catch (err: any) {
     console.warn('Could not fetch FAQs from database, using fallback FAQs:', err.message);
     return DEFAULT_FAQS.filter((f) => f.is_published);
