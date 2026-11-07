@@ -21,6 +21,8 @@ import notificationRoutes from './routes/notificationRoutes';
 import adminPushRoutes from './routes/adminPushRoutes';
 import searchRoutes from './routes/searchRoutes';
 import supportRoutes from './routes/supportRoutes';
+import userRoutes from './routes/userRoutes';
+import weeklyReportRoutes from './routes/weeklyReportRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { apiRateLimiter } from './middleware/rateLimiter';
 
@@ -100,6 +102,16 @@ app.use('/api/v1/search', searchRoutes);
 app.use('/support', supportRoutes);
 app.use('/v1/support', supportRoutes);
 app.use('/api/v1/support', supportRoutes);
+
+// Users — mounted at root, /v1, and /api/v1
+app.use('/users', userRoutes);
+app.use('/v1/users', userRoutes);
+app.use('/api/v1/users', userRoutes);
+
+// Weekly Report — mounted at root, /v1, and /api/v1
+app.use('/weekly-report', weeklyReportRoutes);
+app.use('/v1/weekly-report', weeklyReportRoutes);
+app.use('/api/v1/weekly-report', weeklyReportRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'SabiSweat API is running' });

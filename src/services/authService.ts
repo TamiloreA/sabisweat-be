@@ -21,6 +21,7 @@ import type {
 } from '../models/authModel';
 import type { ProfileRow } from '../models/onboardingModel';
 import { normalizeGender } from '../utils/genderUtils';
+import { mergeWithDefaultPreferences, DEFAULT_USER_PREFERENCES } from '../models/userPreferencesModel';
 
 /**
  * Generate an 8-char alphanumeric referral code
@@ -58,6 +59,7 @@ function mapProfileToAuthUser(row: ProfileRow): AuthUser {
     level: row.sabi_level as SabiLevel | null,
     stepsCount: row.steps_count || 0,
     pointsBalance: row.points_balance || 0,
+    preferences: mergeWithDefaultPreferences(row.preferences),
     finishedOnboardedAt: row.finished_onboarded_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -158,6 +160,7 @@ export async function register(data: RegisterRequest): Promise<{
         city: null, referralCode: null, gender: null, dob: null,
         sabiLevel: null, level: null,
         stepsCount: 0, pointsBalance: 0,
+        preferences: { ...DEFAULT_USER_PREFERENCES },
         finishedOnboardedAt: null, createdAt: null, updatedAt: null,
       },
     };
@@ -235,6 +238,7 @@ export async function login(data: LoginRequest): Promise<AuthResponse> {
         city: null, referralCode: null, gender: null, dob: null,
         sabiLevel: null, level: null,
         stepsCount: 0, pointsBalance: 0,
+        preferences: { ...DEFAULT_USER_PREFERENCES },
         finishedOnboardedAt: null, createdAt: null, updatedAt: null,
       };
 
@@ -399,6 +403,7 @@ export async function refreshToken(data: RefreshTokenRequest): Promise<AuthRespo
         city: null, referralCode: null, gender: null, dob: null,
         sabiLevel: null, level: null,
         stepsCount: 0, pointsBalance: 0,
+        preferences: { ...DEFAULT_USER_PREFERENCES },
         finishedOnboardedAt: null, createdAt: null, updatedAt: null,
       };
 

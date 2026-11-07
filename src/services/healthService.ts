@@ -5,6 +5,10 @@ import {
   WeeklyReportBestDay,
   HealthHistoryAllResponse,
 } from '../models/healthModel';
+import {
+  mergeWithDefaultPreferences,
+  resolveWeekStartDate,
+} from '../models/userPreferencesModel';
 
 export interface HealthSyncPayload {
   date: string;
@@ -263,36 +267,52 @@ function calcChangePercent(current: number, previous: number): number {
 
 export const getWeeklyReport = async (
   userId: string,
-  weekStartDate: string,
+  weekStartDate?: string,
   timezone: string = 'Africa/Lagos'
 ): Promise<WeeklyReportData> => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartDate)) {
-    const err: any = new Error('weekStartDate must be in YYYY-MM-DD format');
-    err.status = 400;
-    throw err;
+  // Fetch step goal and preferences from user's profile
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('step_goal, preferences')
+    .eq('id', userId)
+    .maybeSingle();
+
+  const userPrefs = mergeWithDefaultPreferences(profile?.preferences);
+  const dailyGoalSteps = profile?.step_goal || 8000;
+
+  let resolvedWeekStartDate = weekStartDate ? weekStartDate.trim() : '';
+  if (!resolvedWeekStartDate) {
+    const todayStr = getTodayInTimezone(timezone);
+    resolvedWeekStartDate = resolveWeekStartDate(todayStr, userPrefs.startOfWeek);
+  } else {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(resolvedWeekStartDate)) {
+      const err: any = new Error('weekStartDate must be in YYYY-MM-DD format');
+      err.status = 400;
+      throw err;
+    }
   }
 
-  const startDateObj = new Date(weekStartDate + 'T00:00:00Z');
+  const startDateObj = new Date(resolvedWeekStartDate + 'T00:00:00Z');
   if (isNaN(startDateObj.getTime())) {
     const err: any = new Error('Invalid weekStartDate');
     err.status = 400;
     throw err;
   }
 
-  const weekEndDate = addDays(weekStartDate, 6);
-  const priorWeekStartDate = addDays(weekStartDate, -7);
+  const weekEndDate = addDays(resolvedWeekStartDate, 6);
+  const priorWeekStartDate = addDays(resolvedWeekStartDate, -7);
 
   const todayStr = getTodayInTimezone(timezone);
 
   let isCurrentWeek = false;
   let daysElapsed = 7;
 
-  if (todayStr >= weekStartDate && todayStr <= weekEndDate) {
+  if (todayStr >= resolvedWeekStartDate && todayStr <= weekEndDate) {
     isCurrentWeek = true;
     const diffMs = new Date(todayStr + 'T00:00:00Z').getTime() - startDateObj.getTime();
     const diffDays = Math.round(diffMs / 86400000);
     daysElapsed = Math.min(7, Math.max(1, diffDays + 1));
-  } else if (todayStr < weekStartDate) {
+  } else if (todayStr < resolvedWeekStartDate) {
     isCurrentWeek = false;
     daysElapsed = 0;
   } else {
@@ -300,21 +320,12 @@ export const getWeeklyReport = async (
     daysElapsed = 7;
   }
 
-  // Fetch step goal from user's profile
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('step_goal')
-    .eq('id', userId)
-    .maybeSingle();
-
-  const dailyGoalSteps = profile?.step_goal || 8000;
-
   // Fetch daily_steps for the reporting week
   const { data: currentRecords, error: currentError } = await supabase
     .from('daily_steps')
     .select('date, steps, distance_km, active_calories')
     .eq('user_id', userId)
-    .gte('date', weekStartDate)
+    .gte('date', resolvedWeekStartDate)
     .lte('date', weekEndDate);
 
   if (currentError) {
@@ -338,13 +349,15 @@ export const getWeeklyReport = async (
   let bestDayIndex = 0;
 
   for (let i = 0; i < 7; i++) {
-    const date = addDays(weekStartDate, i);
+    const date = addDays(resolvedWeekStartDate, i);
+    const dayDate = new Date(date + 'T00:00:00Z');
+    const dayIdx = dayDate.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
     const rec = currentMap.get(date) || { steps: 0, distanceKm: 0, activeCalories: 0 };
     const isGoalMet = rec.steps >= dailyGoalSteps;
 
     const dayItem: WeeklyReportDailyBreakdown = {
       date,
-      dayOfWeek: dayOfWeekShort[i],
+      dayOfWeek: dayOfWeekShort[dayIdx],
       steps: rec.steps,
       distanceKm: Math.round(rec.distanceKm * 10) / 10,
       activeCalories: Math.round(rec.activeCalories),
@@ -363,9 +376,11 @@ export const getWeeklyReport = async (
   const totalActiveCalories = Math.round(dailyBreakdown.reduce((sum, d) => sum + d.activeCalories, 0));
   const daysGoalAchieved = dailyBreakdown.filter(d => d.isGoalMet).length;
 
+  const bestDayDate = new Date(dailyBreakdown[bestDayIndex].date + 'T00:00:00Z');
+  const bestDayIdx = bestDayDate.getUTCDay();
   const bestDay: WeeklyReportBestDay = {
     date: dailyBreakdown[bestDayIndex].date,
-    dayOfWeek: dayOfWeekLong[bestDayIndex],
+    dayOfWeek: dayOfWeekLong[bestDayIdx],
     steps: dailyBreakdown[bestDayIndex].steps,
   };
 
@@ -414,7 +429,7 @@ export const getWeeklyReport = async (
   const { data: communityRows, error: commError } = await supabase
     .from('daily_steps')
     .select('user_id, steps')
-    .gte('date', weekStartDate)
+    .gte('date', resolvedWeekStartDate)
     .lte('date', weekEndDate);
 
   if (commError) {
@@ -439,7 +454,7 @@ export const getWeeklyReport = async (
 
   return {
     reportingPeriod: {
-      weekStartDate,
+      weekStartDate: resolvedWeekStartDate,
       weekEndDate,
       isCurrentWeek,
       daysElapsed,
@@ -450,6 +465,8 @@ export const getWeeklyReport = async (
       totalActiveCalories,
       dailyGoalSteps,
       daysGoalAchieved,
+      distanceMeasuredIn: userPrefs.distanceUnit,
+      energyMeasuredIn: userPrefs.energyUnit,
     },
     comparison: {
       stepsChangePercent,

@@ -2,6 +2,8 @@
  * Auth Model — Type definitions for authentication API
  */
 
+import type { UserPreferences } from './userPreferencesModel';
+
 export type OnboardingStatus = 'not_started' | 'in_progress' | 'completed';
 export type AccountStatus = 'pending_confirmation' | 'active';
 export type SabiLevel = 'Starter' | 'Mover' | 'Strider' | 'Champion' | 'Legend';
@@ -26,6 +28,7 @@ export interface AuthUser {
   level: SabiLevel | null;
   stepsCount: number;
   pointsBalance: number;
+  preferences: UserPreferences;
   finishedOnboardedAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;

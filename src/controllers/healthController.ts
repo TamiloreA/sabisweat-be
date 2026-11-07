@@ -174,13 +174,13 @@ export const getWeeklyReport = async (req: AuthenticatedRequest, res: Response, 
       return;
     }
 
-    const weekStartDate = typeof req.query.weekStartDate === 'string' ? req.query.weekStartDate.trim() : '';
-    if (!weekStartDate) {
+    const weekStartDateRaw = typeof req.query.weekStartDate === 'string' ? req.query.weekStartDate.trim() : '';
+    if (weekStartDateRaw && !/^\d{4}-\d{2}-\d{2}$/.test(weekStartDateRaw)) {
       res.status(400).json({
         status: 'error',
         success: false,
         error: 'validation_error',
-        message: 'weekStartDate query parameter is required (YYYY-MM-DD)'
+        message: 'weekStartDate must be in YYYY-MM-DD format',
       });
       return;
     }
@@ -189,7 +189,11 @@ export const getWeeklyReport = async (req: AuthenticatedRequest, res: Response, 
       ? req.query.timezone.trim()
       : 'Africa/Lagos';
 
-    const data = await healthService.getWeeklyReport(req.user.id, weekStartDate, timezone);
+    const data = await healthService.getWeeklyReport(
+      req.user.id,
+      weekStartDateRaw || undefined,
+      timezone
+    );
     res.status(200).json({ status: 'success', success: true, data });
   } catch (error: any) {
     if (error.status) {

@@ -7,6 +7,7 @@ import { getUserSupabase, supabase } from '../config/database';
 import type { ProfileRow } from '../models/onboardingModel';
 import type { OnboardingStatus } from '../models/authModel';
 import { normalizeGender } from '../utils/genderUtils';
+import { mergeWithDefaultPreferences } from '../models/userPreferencesModel';
 
 /**
  * Map a profile row → onboarding profile response
@@ -38,6 +39,7 @@ function mapToOnboardingProfile(row: ProfileRow) {
     onboardingStatus: row.onboarding_status as OnboardingStatus,
     leaderboardVisible: row.leaderboard_visible,
     sharingDefault: row.sharing_default,
+    preferences: mergeWithDefaultPreferences(row.preferences),
     sabiLevel: row.sabi_level,
     stepsCount: row.steps_count,
     pointsBalance: row.points_balance,

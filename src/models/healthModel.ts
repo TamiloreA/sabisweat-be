@@ -42,6 +42,8 @@ export interface WeeklyReportSummary {
   totalActiveCalories: number;
   dailyGoalSteps: number;
   daysGoalAchieved: number;
+  distanceMeasuredIn?: string;
+  energyMeasuredIn?: string;
 }
 
 export interface WeeklyReportComparison {

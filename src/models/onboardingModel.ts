@@ -4,6 +4,7 @@
 
 import type { OnboardingStatus } from './authModel';
 import type { StandardGender } from '../utils/genderUtils';
+import type { UserPreferences } from './userPreferencesModel';
 
 export type Gender =
   | StandardGender
@@ -32,6 +33,7 @@ export interface OnboardingProfile {
   onboardingStatus: OnboardingStatus;
   leaderboardVisible: boolean;
   sharingDefault: boolean;
+  preferences?: UserPreferences;
   createdAt: string;
   updatedAt: string;
 }
@@ -137,6 +139,7 @@ export interface ProfileRow {
   steps_count: number;
   points_balance: number;
   streak_count: number;
+  preferences?: UserPreferences | null;
   finished_onboarded_at: string | null;
   created_at: string;
   updated_at: string;

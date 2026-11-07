@@ -1,12 +1,13 @@
 import { supabase } from '../config/database';
+import { mergeWithDefaultPreferences } from '../models/userPreferencesModel';
 
 export const getHomeSummary = async (userId: string, token: string) => {
   const today = new Date().toISOString().split('T')[0];
   
-  // 1. Fetch profile for step_goal and sabi_level and points
+  // 1. Fetch profile for step_goal and sabi_level and points and preferences
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('step_goal, sabi_level, points_balance')
+    .select('step_goal, sabi_level, points_balance, preferences')
     .eq('id', userId)
     .single();
 
@@ -60,6 +61,7 @@ export const getHomeSummary = async (userId: string, token: string) => {
     dailyAvgSteps,
     sabiLevel: profile.sabi_level || 'Beginner',
     pointsBalance: profile.points_balance || 0,
+    preferences: mergeWithDefaultPreferences(profile.preferences),
     todayFeedPreview
   };
 };
