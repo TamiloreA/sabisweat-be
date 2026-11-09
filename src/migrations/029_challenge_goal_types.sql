@@ -4,6 +4,14 @@
 -- Aligns existing challenges with the three supported types:
 -- 'daily_step', 'steps_goal', 'most_steps'.
 
+-- 0. Update check constraint to allow new goal types
+ALTER TABLE public.challenges DROP CONSTRAINT IF EXISTS challenges_goal_type_check;
+ALTER TABLE public.challenges DROP CONSTRAINT IF EXISTS chk_goal_type;
+
+ALTER TABLE public.challenges
+  ADD CONSTRAINT challenges_goal_type_check
+  CHECK (goal_type IN ('daily_step', 'steps_goal', 'most_steps', 'steps'));
+
 -- 1. Specific Daily Step Challenges
 UPDATE public.challenges SET
   goal_type = 'daily_step',
@@ -69,3 +77,4 @@ UPDATE public.challenges SET
   goal_type = 'steps_goal',
   updated_at = NOW()
 WHERE goal_type = 'steps' OR goal_type IS NULL;
+
