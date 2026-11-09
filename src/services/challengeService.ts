@@ -10,6 +10,7 @@ import type {
   ChallengeRow,
   ChallengeResponse,
   ChallengeProgress,
+  ChallengeGoalType,
   LeaderboardEntry,
   LeaderboardResponse,
   CreateChallengeInput,
@@ -127,13 +128,110 @@ async function getParticipantsCount(challengeId: string): Promise<number> {
 }
 
 /**
- * Compute a user's progress in a challenge from daily_steps.
+ * Normalize raw goal_type into one of the three supported challenge types:
+ * 'daily_step' | 'steps_goal' | 'most_steps'.
+ * Falls back using title/subtitle cues for legacy rows.
  */
-async function computeProgress(
+export function normalizeGoalType(
+  rawGoalType?: string | null,
+  title?: string | null,
+  subtitle?: string | null
+): ChallengeGoalType {
+  const normalized = (rawGoalType || '').trim().toLowerCase();
+  if (normalized === 'daily_step' || normalized === 'daily_steps' || normalized === 'daily') {
+    return 'daily_step';
+  }
+  if (normalized === 'steps_goal' || normalized === 'step_goal' || normalized === 'cumulative') {
+    return 'steps_goal';
+  }
+  if (normalized === 'most_steps' || normalized === 'highest_steps' || normalized === 'race') {
+    return 'most_steps';
+  }
+
+  // Fallback for legacy 'steps' or unspecified: infer from title/subtitle
+  const combined = `${title || ''} ${subtitle || ''}`.toLowerCase();
+  if (combined.includes('streak') || combined.includes('every day') || combined.includes('daily') || combined.includes('blitz')) {
+    return 'daily_step';
+  }
+  if (combined.includes('most steps') || combined.includes('leaderboard race')) {
+    return 'most_steps';
+  }
+
+  return 'steps_goal';
+}
+
+/**
+ * Helper to fetch the leader's step count and total active participants for 'most_steps' challenges.
+ */
+async function getMostStepsLeaderStats(
+  challengeId: string,
+  startAt: string,
+  endAt: string
+): Promise<{ leaderSteps: number; totalParticipants: number }> {
+  const startDate = new Date(startAt).toISOString().split('T')[0];
+  const endDate = new Date(endAt).toISOString().split('T')[0];
+
+  const { data: participants, error: pError } = await supabase
+    .from(PARTICIPANTS_TABLE)
+    .select('user_id, joined_at')
+    .eq('challenge_id', challengeId)
+    .is('left_at', null);
+
+  if (pError || !participants || participants.length === 0) {
+    return { leaderSteps: 0, totalParticipants: 0 };
+  }
+
+  const participantIds = participants.map((p) => p.user_id);
+  const partMap = new Map(participants.map((p) => [p.user_id, p.joined_at]));
+
+  const { data: stepsData, error: sError } = await supabase
+    .from(DAILY_STEPS_TABLE)
+    .select('user_id, steps, date')
+    .in('user_id', participantIds)
+    .gte('date', startDate)
+    .lte('date', endDate);
+
+  if (sError || !stepsData) {
+    return { leaderSteps: 0, totalParticipants: participants.length };
+  }
+
+  const stepsMap = new Map<string, number>();
+  for (const row of stepsData) {
+    const pJoinedAt = partMap.get(row.user_id);
+    const challengeStartStr = new Date(startAt).toISOString().split('T')[0];
+    const effectiveStart = pJoinedAt
+      ? new Date(Math.max(new Date(startAt).getTime(), new Date(pJoinedAt).getTime())).toISOString().split('T')[0]
+      : challengeStartStr;
+
+    if (row.date >= effectiveStart) {
+      stepsMap.set(row.user_id, (stepsMap.get(row.user_id) || 0) + (row.steps || 0));
+    }
+  }
+
+  let maxSteps = 0;
+  for (const uid of participantIds) {
+    const total = stepsMap.get(uid) || 0;
+    if (total > maxSteps) {
+      maxSteps = total;
+    }
+  }
+
+  return { leaderSteps: maxSteps, totalParticipants: participants.length };
+}
+
+export interface ComputeProgressResult extends ChallengeProgress {
+  effectiveGoalType: ChallengeGoalType;
+  effectiveGoalValue: number;
+}
+
+/**
+ * Compute a user's progress in a challenge from daily_steps according to goalType rules.
+ */
+export async function computeProgress(
   userId: string,
   challengeRow: ChallengeRow,
   joinedAtStr?: string
-): Promise<ChallengeProgress> {
+): Promise<ComputeProgressResult> {
   const challengeStart = new Date(challengeRow.start_at);
   const joinedAt = joinedAtStr ? new Date(joinedAtStr) : challengeStart;
   const effectiveStart = joinedAt > challengeStart ? joinedAt : challengeStart;
@@ -161,25 +259,77 @@ async function computeProgress(
   const todayRow = rows.find((r) => r.date === today);
   const todaySteps = todayRow ? todayRow.steps : 0;
 
-  const goalValue = challengeRow.goal_value || 1;
+  const goalType = normalizeGoalType(challengeRow.goal_type, challengeRow.title, challengeRow.subtitle);
   const challengeTotalDays = daysBetween(challengeRow.start_at, challengeRow.end_at);
-
-  // Days where user met the daily goal
-  const daysCompletedRaw = rows.filter((r) => r.steps >= goalValue).length;
-  const bonusDaysAdded = 0; // Reserved for future bonus logic
-  const daysCompleted = daysCompletedRaw + bonusDaysAdded;
-
-  // Days evaluated (between start and today, capped at challenge end)
   const effectiveEnd = today < endDate ? today : endDate;
   const evaluatedDays = daysBetween(startDate, effectiveEnd);
-
   const daysRemaining = Math.max(0, daysBetween(today, endDate));
+  const bonusDaysAdded = 0;
 
-  // Percent is based on total steps vs (goalValue * challengeTotalDays)
-  const totalGoalSteps = goalValue * challengeTotalDays;
-  const percent = Math.min(100, Math.round((totalSteps / totalGoalSteps) * 100));
+  let percent = 0;
+  let effectiveGoalValue = challengeRow.goal_value || 0;
+  let daysCompletedRaw = 0;
 
-  return {
+  if (goalType === 'daily_step') {
+    // A. daily_step:
+    // progress.todaySteps: Total steps taken today
+    // goalValue: The daily step target (e.g. 10000)
+    // progress.percent: Percentage of today's target completed: min(100, round((todaySteps / goalValue) * 100))
+    // progress.steps: Total steps accumulated across the challenge so far
+    // progress.daysCompleted: Number of days where user reached or exceeded goalValue
+    effectiveGoalValue = challengeRow.goal_value || 10000;
+    percent = effectiveGoalValue > 0
+      ? Math.min(100, Math.round((todaySteps / effectiveGoalValue) * 100))
+      : 0;
+    daysCompletedRaw = rows.filter((r) => (r.steps || 0) >= effectiveGoalValue).length;
+  } else if (goalType === 'steps_goal') {
+    // B. steps_goal:
+    // progress.steps: Total cumulative steps accumulated within challenge duration
+    // goalValue: The total step goal for the challenge (e.g. 50000)
+    // progress.percent: Percentage of total goal completed: min(100, round((progress.steps / goalValue) * 100))
+    // progress.todaySteps: Steps taken today
+    effectiveGoalValue = challengeRow.goal_value || 50000;
+    percent = effectiveGoalValue > 0
+      ? Math.min(100, Math.round((totalSteps / effectiveGoalValue) * 100))
+      : 0;
+    const avgDailyTarget = challengeTotalDays > 0 ? Math.round(effectiveGoalValue / challengeTotalDays) : effectiveGoalValue;
+    daysCompletedRaw = rows.filter((r) => (r.steps || 0) >= avgDailyTarget).length;
+  } else if (goalType === 'most_steps') {
+    // C. most_steps (Leaderboard Pace):
+    // progress.steps: Total cumulative steps accumulated within challenge duration
+    // goalValue: Total steps of participant currently in 1st place
+    const { leaderSteps, totalParticipants } = await getMostStepsLeaderStats(
+      challengeRow.id,
+      challengeRow.start_at,
+      challengeRow.end_at
+    );
+
+    if (totalParticipants <= 1) {
+      if (totalSteps > 0) {
+        percent = 100;
+        effectiveGoalValue = totalSteps;
+      } else {
+        percent = 0;
+        effectiveGoalValue = 0;
+      }
+    } else {
+      if (totalSteps >= leaderSteps && totalSteps > 0) {
+        percent = 100;
+        effectiveGoalValue = leaderSteps;
+      } else if (leaderSteps > 0) {
+        percent = Math.min(100, Math.round((totalSteps / leaderSteps) * 100));
+        effectiveGoalValue = leaderSteps;
+      } else {
+        percent = 0;
+        effectiveGoalValue = 0;
+      }
+    }
+    daysCompletedRaw = rows.filter((r) => (r.steps || 0) > 0).length;
+  }
+
+  const daysCompleted = daysCompletedRaw + bonusDaysAdded;
+
+  const progress: ChallengeProgress = {
     steps: totalSteps,
     distanceMeters: totalDistanceMeters,
     percent,
@@ -191,6 +341,12 @@ async function computeProgress(
     evaluatedDays,
     daysRemaining,
   };
+
+  return {
+    ...progress,
+    effectiveGoalType: goalType,
+    effectiveGoalValue,
+  };
 }
 
 /**
@@ -200,10 +356,23 @@ function mapChallengeRow(
   row: ChallengeRow,
   participantsCount: number,
   participantInfo?: { joined: boolean; joinedAt?: string; claimedAt?: string | null },
-  progress?: ChallengeProgress,
+  progress?: ComputeProgressResult | ChallengeProgress,
   clubInfo?: ClubHostInfo
 ): ChallengeResponse {
   const joined = participantInfo?.joined ?? false;
+
+  const effectiveGoalType = (progress && 'effectiveGoalType' in progress)
+    ? progress.effectiveGoalType
+    : normalizeGoalType(row.goal_type, row.title, row.subtitle);
+
+  let effectiveGoalValue: number | undefined;
+  if (progress && 'effectiveGoalValue' in progress) {
+    effectiveGoalValue = progress.effectiveGoalValue;
+  } else if (effectiveGoalType === 'most_steps') {
+    effectiveGoalValue = row.goal_value || 0;
+  } else {
+    effectiveGoalValue = row.goal_value ?? undefined;
+  }
 
   // Eligibility: user has met the goal
   const eligible = joined && progress ? progress.percent >= 100 : false;
@@ -240,8 +409,8 @@ function mapChallengeRow(
     region: row.region ?? undefined,
     startAt: row.start_at,
     endAt: row.end_at,
-    goalType: row.goal_type ?? undefined,
-    goalValue: row.goal_value ?? undefined,
+    goalType: effectiveGoalType,
+    goalValue: effectiveGoalValue,
     participantsCount,
     maxParticipants: row.max_participants ?? undefined,
     joined,
@@ -1022,6 +1191,10 @@ export async function createChallenge(
     }
   }
 
+  const validatedGoalType = normalizeGoalType(input.goalType, input.title, input.subtitle);
+  const defaultGoalValue = validatedGoalType === 'most_steps' ? 0 : (validatedGoalType === 'steps_goal' ? 50000 : 10000);
+  const validatedGoalValue = input.goalValue !== undefined ? input.goalValue : defaultGoalValue;
+
   // Insert challenge row
   const rowToInsert: Record<string, any> = {
     id: challengeId,
@@ -1038,8 +1211,8 @@ export async function createChallenge(
     city_tag: input.cityTag ?? null,
     country: input.country ?? null,
     region: input.region ?? null,
-    goal_type: input.goalType ?? 'steps',
-    goal_value: input.goalValue ?? 10000,
+    goal_type: validatedGoalType,
+    goal_value: validatedGoalValue,
     max_participants: input.maxParticipants ?? null,
     host_name: hostName ?? null,
     host_logo_url: hostLogoUrl ?? null,

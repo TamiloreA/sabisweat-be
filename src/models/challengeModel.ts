@@ -4,6 +4,8 @@
  * TypeScript interfaces for the challenges domain.
  */
 
+export type ChallengeGoalType = 'daily_step' | 'steps_goal' | 'most_steps' | 'steps';
+
 export interface CreateChallengeInput {
   title: string;
   subtitle?: string;
@@ -20,7 +22,7 @@ export interface CreateChallengeInput {
   cityTag?: string;
   country?: string;
   region?: string;
-  goalType?: string;
+  goalType?: ChallengeGoalType | string;
   goalValue?: number;
   maxParticipants?: number;
   hostName?: string;
@@ -48,7 +50,7 @@ export interface ChallengeRow {
   city_tag: string | null;
   country: string | null;
   region: string | null;
-  goal_type: string | null;
+  goal_type: ChallengeGoalType | string | null;
   goal_value: number | null;
   max_participants: number | null;
   host_name: string | null;
@@ -112,7 +114,7 @@ export interface ChallengeResponse {
   region?: string;
   startAt: string;
   endAt: string;
-  goalType?: string;
+  goalType?: ChallengeGoalType | string;
   goalValue?: number;
   participantsCount: number;
   maxParticipants?: number;
