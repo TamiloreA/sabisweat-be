@@ -96,6 +96,7 @@ router.post('/social/GoogleAndApple', socialLogin);
  * /auth/forgot:
  *   post:
  *     summary: Request password reset email
+ *     description: Generates a 6-digit verification code and emails it to the user. Always returns ok to prevent email enumeration.
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -107,9 +108,25 @@ router.post('/social/GoogleAndApple', socialLogin);
  *             properties:
  *               email:
  *                 type: string
+ *                 format: email
+ *                 example: mover@sabisweat.com
  *     responses:
  *       200:
- *         description: Reset email sent (always returns ok)
+ *         description: Reset email dispatched
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     ok:
+ *                       type: boolean
+ *                       example: true
  */
 router.post('/forgot', authRateLimiter, forgotPassword);
 
@@ -118,6 +135,7 @@ router.post('/forgot', authRateLimiter, forgotPassword);
  * /auth/verify:
  *   post:
  *     summary: Verify password reset code
+ *     description: Validates the 6-digit numeric OTP code sent to the user's email. On success, returns a signed resetToken.
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -129,13 +147,33 @@ router.post('/forgot', authRateLimiter, forgotPassword);
  *             properties:
  *               email:
  *                 type: string
+ *                 format: email
+ *                 example: mover@sabisweat.com
  *               code:
  *                 type: string
+ *                 example: "123456"
  *     responses:
  *       200:
- *         description: Code verified, returns reset token
+ *         description: Code verified successfully, returns reset token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     resetToken:
+ *                       type: string
+ *                       example: "jwt_reset_token_here"
+ *                     expiresAt:
+ *                       type: integer
+ *                       example: 1794248400000
  *       400:
- *         description: Invalid or expired code
+ *         description: Invalid, expired, or locked out code
  */
 router.post('/verify', authRateLimiter, verifyCode);
 
@@ -144,6 +182,7 @@ router.post('/verify', authRateLimiter, verifyCode);
  * /auth/reset:
  *   post:
  *     summary: Reset password with verified token
+ *     description: Sets the new password using the verified resetToken obtained from /auth/verify.
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -155,12 +194,30 @@ router.post('/verify', authRateLimiter, verifyCode);
  *             properties:
  *               resetToken:
  *                 type: string
+ *                 example: "jwt_reset_token_here"
  *               password:
  *                 type: string
  *                 minLength: 8
+ *                 example: "newSecretPassword123"
  *     responses:
  *       200:
  *         description: Password reset successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     ok:
+ *                       type: boolean
+ *                       example: true
+ *       400:
+ *         description: Invalid reset token or password length less than 8 characters
  */
 router.post('/reset', authRateLimiter, resetPassword);
 

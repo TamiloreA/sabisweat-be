@@ -50,7 +50,9 @@ app.use('/onboarding', onboardingRoutes);
 app.use('/api/v1/onboarding', onboardingRoutes);
 app.use('/health', healthRoutes);
 app.use('/api/v1/health', healthRoutes);
+app.use('/home', homeRoutes);
 app.use('/api/v1/home', homeRoutes);
+app.use('/points', pointsRoutes);
 app.use('/api/v1/points', pointsRoutes);
 
 // Push — mounted both at root and /api/v1

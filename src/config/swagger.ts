@@ -295,6 +295,73 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
+        HomeSummaryResponse: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', example: 'success' },
+            success: { type: 'boolean', example: true },
+            data: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', format: 'uuid', example: 'c4e40277-2b74-4bca-8f3a-969427b5e406' },
+                email: { type: 'string', example: 'mover@sabisweat.com' },
+                username: { type: 'string', nullable: true, example: 'sabimover' },
+                firstName: { type: 'string', nullable: true, example: 'Tami' },
+                lastName: { type: 'string', nullable: true, example: 'Akin' },
+                stepsToday: { type: 'integer', example: 5420 },
+                distanceTodayKm: { type: 'number', example: 4.1 },
+                stepGoal: { type: 'integer', example: 10000 },
+                progressPercent: { type: 'integer', example: 54 },
+                dailyAvgSteps: { type: 'integer', example: 8120 },
+                todayFeedPreview: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      title: { type: 'string' },
+                      category: { type: 'string' },
+                      start_at: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        PointsBalanceResponse: {
+          type: 'object',
+          properties: {
+            pointsBalance: { type: 'integer', example: 1250 },
+          },
+        },
+        NotificationInboxItem: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', format: 'uuid', example: '9a8b7c6d-5e4f-3a2b-1c0d-e9f8a7b6c5d4' },
+            type: { type: 'string', example: 'STREAK_ALERT' },
+            title: { type: 'string', example: "Don't break the chain" },
+            body: { type: 'string', example: 'Complete your daily steps before midnight to keep your 7-day streak alive' },
+            imageUrl: { type: 'string', nullable: true, example: 'https://cdn.sabisweat.com/flame.png' },
+            screen: { type: 'string', nullable: true, example: 'StreakDetails' },
+            params: { type: 'object', nullable: true },
+            isRead: { type: 'boolean', example: false },
+            createdAt: { type: 'string', format: 'date-time', example: '2026-11-09T18:30:00.000Z' },
+          },
+        },
+        PushDeviceRegistration: {
+          type: 'object',
+          required: ['token', 'platform'],
+          properties: {
+            token: { type: 'string', example: 'ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]' },
+            platform: { type: 'string', enum: ['ios', 'android', 'web'], example: 'ios' },
+            deviceId: { type: 'string', example: 'device_abc123' },
+            deviceName: { type: 'string', example: 'iPhone 15 Pro' },
+            appId: { type: 'string', example: 'com.sabisweat.app' },
+            appVersion: { type: 'string', example: '1.0.0' },
+            timezone: { type: 'string', example: 'Africa/Lagos' },
+          },
+        },
       },
     },
   },
