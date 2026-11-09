@@ -193,7 +193,7 @@ export interface UnreadCountResponse {
  */
 export interface NotificationDataPayload {
   notificationId?: string;
-  type: string;
+  type?: string;
   screen?: string;
   params?: Record<string, any>;
   entityId?: string;
@@ -239,6 +239,9 @@ export interface ExpoPushMessage {
   priority?: 'default' | 'normal' | 'high';
   channelId?: string;
   categoryId?: string;
+  richContent?: {
+    image?: string;
+  };
   ttl?: number;
   expiration?: number;
   subtitle?: string;

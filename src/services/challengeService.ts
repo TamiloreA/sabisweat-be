@@ -16,6 +16,7 @@ import type {
   PaginatedChallengesResponse,
 } from '../models/challengeModel';
 import type { CompletedChallengeDetail } from '../models/achievementModel';
+import { handleChallengeCreatedEvent } from './notificationEventService';
 
 const CHALLENGES_TABLE = 'challenges';
 const PARTICIPANTS_TABLE = 'challenge_participants';
@@ -1080,6 +1081,13 @@ export async function createChallenge(
 
   if (created && input.rewardId && created.reward_id === undefined) {
     created.reward_id = input.rewardId;
+  }
+
+  // Asynchronously dispatch challenge discovery notifications based on club privacy
+  if (created?.id) {
+    handleChallengeCreatedEvent(created.id).catch((err) => {
+      console.warn('[challengeService] Error dispatching challenge discovery notifications:', err);
+    });
   }
 
   return mapChallengeRow(created as ChallengeRow, 0, { joined: false }, undefined, clubInfo);

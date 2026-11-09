@@ -51,7 +51,7 @@ export async function dispatchNotification(
   let notificationId: string | undefined;
   if (channel === 'all' || channel === 'in_app' || channel === 'push') {
     try {
-      const { notification } = await createInAppNotification({
+      const { notification, isNew } = await createInAppNotification({
         userId,
         type,
         title,
@@ -64,8 +64,14 @@ export async function dispatchNotification(
       });
 
       notificationId = notification.id;
-      result.inAppCreated = true;
+      result.inAppCreated = isNew;
       result.notificationId = notificationId;
+
+      // If notification already exists for this idempotency key, suppress duplicate push and email
+      if (!isNew) {
+        console.log(`[dispatcher] Idempotent notification already dispatched: ${idempotencyKey}`);
+        return result;
+      }
     } catch (err: any) {
       console.error('[dispatcher] Failed to create in-app notification:', err);
       result.errors?.push(`In-App error: ${err?.message || err}`);
@@ -87,13 +93,14 @@ export async function dispatchNotification(
 
       if (activeDevices.length > 0) {
         const pushMessages: ExpoPushMessage[] = activeDevices.map((device) => {
-          return {
+          const msg: ExpoPushMessage = {
             to: device.expo_push_token,
             title,
             body,
             badge: result.unreadCount, // Authoritative badge count
             sound: 'default',
             priority: 'high',
+            channelId: 'default',
             data: {
               ...dataPayload,
               notificationId: notificationId || dataPayload.notificationId,
@@ -101,8 +108,15 @@ export async function dispatchNotification(
               screen: dataPayload.screen,
               params: dataPayload.params,
               deepLink: dataPayload.deepLink,
+              ...(imageUrl ? { imageUrl } : {}),
             },
           };
+
+          if (imageUrl) {
+            msg.richContent = { image: imageUrl };
+          }
+
+          return msg;
         });
 
         const sendResults = await sendPushChunked(pushMessages);

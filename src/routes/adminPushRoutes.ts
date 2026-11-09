@@ -10,6 +10,7 @@ import {
   dispatchToUser,
   sendTestPush,
   runCron,
+  disburseRewards,
 } from '../controllers/notificationAdminController';
 
 const router = Router();
@@ -99,5 +100,6 @@ router.post('/test', requireAuth, sendTestPush);
  *         description: Cron run result
  */
 router.post('/cron-run', runCron);
+router.post('/challenges/:challengeId/disburse-rewards', disburseRewards);
 
 export default router;

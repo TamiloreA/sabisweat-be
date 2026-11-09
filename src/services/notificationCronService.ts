@@ -8,6 +8,11 @@ import { ScheduleNotificationInput } from '../models/notificationModel';
 import { dispatchNotification } from './notificationDispatcher';
 import { fetchReceipts } from './expoPushService';
 import { deactivateInvalidToken } from './deviceService';
+import {
+  processMorningKickoffJob,
+  processStreakAtRiskJob,
+  processChallengeEndingSoonJob,
+} from './notificationEventService';
 
 const TABLE_SCHEDULES = 'notification_schedules';
 const TABLE_ATTEMPTS = 'notification_delivery_attempts';
@@ -255,14 +260,20 @@ export async function processPendingReceipts(batchSize = 100): Promise<{
 /**
  * Master runner to execute all cron tasks
  */
-export async function runAllCronTasks(): Promise<{
+export async function runAllCronTasks(now: Date = new Date()): Promise<{
   schedules: { processed: number; completed: number; expired: number; failed: number };
   receipts: { checked: number; ok: number; failed: number; deactivatedTokens: number };
+  morningKickoff: { evaluated: number; sent: number };
+  streakAtRisk: { evaluated: number; sent: number };
+  challengeEndingSoon: { challengesChecked: number; sent: number };
 }> {
-  const [schedules, receipts] = await Promise.all([
+  const [schedules, receipts, morningKickoff, streakAtRisk, challengeEndingSoon] = await Promise.all([
     processScheduledNotifications(),
     processPendingReceipts(),
+    processMorningKickoffJob(now),
+    processStreakAtRiskJob(now),
+    processChallengeEndingSoonJob(now),
   ]);
 
-  return { schedules, receipts };
+  return { schedules, receipts, morningKickoff, streakAtRisk, challengeEndingSoon };
 }

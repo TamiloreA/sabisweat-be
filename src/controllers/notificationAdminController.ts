@@ -7,6 +7,7 @@ import { Request, Response, NextFunction } from 'express';
 import { dispatchNotification } from '../services/notificationDispatcher';
 import { sendPushChunked } from '../services/expoPushService';
 import { runAllCronTasks } from '../services/notificationCronService';
+import { disburseChallengeRewards } from '../services/notificationEventService';
 
 export const dispatchToUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -81,6 +82,20 @@ export const runCron = async (req: Request, res: Response, next: NextFunction): 
       processed: results.schedules.processed + results.receipts.checked,
       data: results,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const disburseRewards = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const challengeId = req.params.challengeId || req.body?.challengeId;
+    if (!challengeId) {
+      res.status(400).json({ success: false, error: 'challengeId is required' });
+      return;
+    }
+    const result = await disburseChallengeRewards(challengeId);
+    res.status(200).json({ success: true, data: result });
   } catch (error) {
     next(error);
   }

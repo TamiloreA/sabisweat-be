@@ -9,6 +9,7 @@ import {
   mergeWithDefaultPreferences,
   resolveWeekStartDate,
 } from '../models/userPreferencesModel';
+import { handleStepSyncEvents } from './notificationEventService';
 
 export interface HealthSyncPayload {
   date: string;
@@ -63,6 +64,11 @@ export const syncStepData = async (userId: string, payload: HealthSyncPayload, t
     throw { status: 500, error: 'server_error', message: 'Failed to sync step data' };
   }
 
+  // Asynchronously evaluate business notification events (milestones, streak completion, challenges)
+  handleStepSyncEvents(userId, payload.date, steps, payload.timeZone).catch((err) => {
+    console.warn('[healthService] Error processing step sync notification events:', err);
+  });
+
   return { message: 'Sync successful', syncedAt: updateData.synced_at };
 };
 
@@ -109,6 +115,14 @@ export const syncStepDataBatch = async (
   if (error) {
     console.error('syncStepDataBatch error:', error);
     throw { status: 500, error: 'server_error', message: 'Failed to sync batch data' };
+  }
+
+  // Asynchronously evaluate business notification events for the latest record
+  if (records.length > 0) {
+    const latest = records[records.length - 1];
+    handleStepSyncEvents(userId, latest.date, latest.steps, latest.time_zone).catch((err) => {
+      console.warn('[healthService] Error processing batch step sync notification events:', err);
+    });
   }
 
   return { message: 'Batch sync successful' };
