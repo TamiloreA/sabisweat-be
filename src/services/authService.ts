@@ -685,12 +685,27 @@ export async function forgotPassword(data: ForgotPasswordRequest): Promise<{ ok:
     category: 'password_reset',
   });
 
-  if (!sendResult.success) {
-    console.warn(
-      '[authService] Warning: Reset email delivery failed or unconfigured:',
-      sendResult.error
-    );
+  // If Resend is unconfigured/simulated (e.g. no RESEND_API_KEY) or failed in non-test runtime,
+  // ensure email is actually delivered via Supabase Auth's built-in mailer
+  const isSimulated =
+    !process.env.RESEND_API_KEY ||
+    !process.env.RESEND_API_KEY.trim() ||
+    sendResult.id?.startsWith('sim_');
+
+  if (!sendResult.success || (isSimulated && process.env.NODE_ENV !== 'test')) {
+    try {
+      console.log(
+        `[authService] RESEND_API_KEY unconfigured or simulated. Dispatching reset email via Supabase Auth mailer for ${normalizedEmail}`
+      );
+      const { error: supaError } = await supabase.auth.resetPasswordForEmail(normalizedEmail);
+      if (supaError) {
+        console.warn('[authService] Supabase resetPasswordForEmail warning:', supaError);
+      }
+    } catch (err) {
+      console.warn('[authService] Error calling Supabase resetPasswordForEmail:', err);
+    }
   }
+
   console.log(`[authService] 🔑 Reset code generated for ${normalizedEmail}: ${code}`);
 
   return { ok: true };
@@ -738,50 +753,78 @@ export async function verifyResetCode(data: VerifyCodeRequest): Promise<VerifyCo
     throw { status: 400, error: 'code_invalid', message: 'Invalid reset code' };
   }
 
+  // 1. Check backend-stored OTP code
   const stored = await getStoredResetCode(userId, normalizedEmail);
-  if (!stored) {
-    throw { status: 400, error: 'code_invalid', message: 'Invalid reset code' };
+  if (stored) {
+    if (stored.attempts >= MAX_VERIFY_ATTEMPTS) {
+      await clearResetSession(userId, normalizedEmail);
+      throw {
+        status: 429,
+        error: 'attempts_exceeded',
+        message: 'Too many incorrect attempts. Please request a new code.',
+      };
+    }
+
+    if (Date.now() <= stored.expiresAt) {
+      const inputHash = hashResetCode(inputCode);
+      if (inputHash === stored.codeHash) {
+        // Valid! Generate secure resetToken
+        const resetTokenId = crypto.randomUUID();
+        const resetToken = signResetToken({
+          sub: userId,
+          email: normalizedEmail,
+          jti: resetTokenId,
+          purpose: 'password_reset',
+          exp: Date.now() + 60 * 60 * 1000, // 1 hour
+        });
+
+        await markCodeVerified(userId, normalizedEmail, resetTokenId, stored.recordId);
+
+        return {
+          resetToken,
+          expiresIn: 3600,
+        };
+      } else {
+        await recordFailedAttempt(userId, normalizedEmail, stored.recordId, stored.attempts + 1);
+      }
+    } else {
+      await recordFailedAttempt(userId, normalizedEmail, stored.recordId, stored.attempts + 1);
+    }
   }
 
-  // Check expiration
-  if (Date.now() > stored.expiresAt) {
-    await recordFailedAttempt(userId, normalizedEmail, stored.recordId, stored.attempts + 1);
+  // 2. If backend code didn't match (or email was delivered by Supabase with {{ .Token }}),
+  // verify via Supabase Auth OTP recovery
+  try {
+    const { data: supaVerify, error: supaError } = await authClient.auth.verifyOtp({
+      email: normalizedEmail,
+      token: inputCode,
+      type: 'recovery',
+    });
+
+    if (!supaError && supaVerify?.session) {
+      const resetTokenId = crypto.randomUUID();
+      const resetToken = signResetToken({
+        sub: userId,
+        email: normalizedEmail,
+        jti: resetTokenId,
+        purpose: 'password_reset',
+        exp: Date.now() + 60 * 60 * 1000,
+      });
+
+      await markCodeVerified(userId, normalizedEmail, resetTokenId, stored?.recordId);
+
+      return {
+        resetToken,
+        expiresIn: 3600,
+      };
+    }
+  } catch {}
+
+  if (stored && Date.now() > stored.expiresAt) {
     throw { status: 400, error: 'code_expired', message: 'Reset code has expired' };
   }
 
-  // Check attempt limit
-  if (stored.attempts >= MAX_VERIFY_ATTEMPTS) {
-    await clearResetSession(userId, normalizedEmail);
-    throw {
-      status: 429,
-      error: 'attempts_exceeded',
-      message: 'Too many incorrect attempts. Please request a new code.',
-    };
-  }
-
-  // Verify hash
-  const inputHash = hashResetCode(inputCode);
-  if (inputHash !== stored.codeHash) {
-    await recordFailedAttempt(userId, normalizedEmail, stored.recordId, stored.attempts + 1);
-    throw { status: 400, error: 'code_invalid', message: 'Invalid reset code' };
-  }
-
-  // Valid! Generate secure resetToken
-  const resetTokenId = crypto.randomUUID();
-  const resetToken = signResetToken({
-    sub: userId,
-    email: normalizedEmail,
-    jti: resetTokenId,
-    purpose: 'password_reset',
-    exp: Date.now() + 60 * 60 * 1000, // 1 hour
-  });
-
-  await markCodeVerified(userId, normalizedEmail, resetTokenId, stored.recordId);
-
-  return {
-    resetToken,
-    expiresIn: 3600,
-  };
+  throw { status: 400, error: 'code_invalid', message: 'Invalid reset code' };
 }
 
 /**

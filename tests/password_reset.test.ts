@@ -40,6 +40,7 @@ jest.mock('../src/config/database', () => {
       auth: {
         signInWithPassword: jest.fn(),
         refreshSession: jest.fn(),
+        verifyOtp: jest.fn(async () => ({ data: null, error: { message: 'Invalid' } })),
       },
     },
     supabase: {
@@ -111,6 +112,7 @@ jest.mock('../src/config/database', () => {
         };
       },
       auth: {
+        resetPasswordForEmail: jest.fn(async () => ({ data: {}, error: null })),
         admin: {
           getUserById: jest.fn(async (id: string) => ({
             data: {
