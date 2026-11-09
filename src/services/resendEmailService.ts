@@ -38,9 +38,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
   }
 
   const fromEmail =
-    options.from ||
-    process.env.RESEND_FROM_EMAIL ||
-    'SabiSweat <onboarding@resend.dev>';
+    options.from || process.env.RESEND_FROM_EMAIL || 'SabiSweat <onboarding@resend.dev>';
 
   const recipients = Array.isArray(options.to) ? options.to : [options.to];
 
@@ -102,6 +100,59 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
  * Email Templates for Product Notifications
  */
 export const emailTemplates = {
+  passwordResetCode(data: { code: string; userName?: string }): {
+    subject: string;
+    html: string;
+    text: string;
+  } {
+    const subject = `Your SabiSweat Password Reset Code: ${data.code}`;
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f7f9fa; color: #1a1a1a; margin: 0; padding: 24px; }
+    .container { max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e5e7eb; }
+    .header { background: #00D06C; padding: 32px 24px; text-align: center; color: #ffffff; }
+    .content { padding: 32px 24px; }
+    .code-box { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; text-align: center; margin: 24px 0; }
+    .code { font-size: 38px; font-weight: bold; letter-spacing: 10px; color: #00D06C; font-family: 'Courier New', Courier, monospace; }
+    .instruction { font-size: 15px; color: #4b5563; line-height: 1.6; margin: 16px 0; }
+    .expiry { font-size: 13px; color: #9ca3af; margin-top: 20px; }
+    .footer { text-align: center; padding: 24px; font-size: 12px; color: #9ca3af; border-top: 1px solid #e5e7eb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 style="margin:0; font-size: 24px;">Reset Your Password</h1>
+    </div>
+    <div class="content">
+      <p style="font-size: 16px; text-align: left;">Hi ${data.userName || 'Sabi Mover'},</p>
+      <p class="instruction" style="text-align: left;">
+        We received a request to reset your SabiSweat password. Enter the 6-digit verification code below on the reset password screen in the app:
+      </p>
+      <div class="code-box">
+        <div class="code">${data.code}</div>
+      </div>
+      <p class="expiry">
+        This code is valid for <strong>10 minutes</strong>. If you did not request a password reset, you can safely ignore this email — your password will remain unchanged.
+      </p>
+    </div>
+    <div class="footer">
+      <p>© ${new Date().getFullYear()} SabiSweat. Keep stepping, keep winning.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const text = `Hi ${data.userName || 'Sabi Mover'},\n\nYour SabiSweat password reset verification code is: ${data.code}\n\nEnter this 6-digit code on the reset password screen in the app.\nThis code will expire in 10 minutes.\n\nIf you did not request a password reset, you can safely ignore this email.`;
+
+    return { subject, html, text };
+  },
+
   weeklyActivitySummary(data: {
     userName: string;
     totalSteps: number;
