@@ -34,6 +34,7 @@ export const PUSH_CATEGORIES = {
   STREAK_ALERT: 'STREAK_ALERT',
   CHALLENGE_UPDATE: 'CHALLENGE_UPDATE',
   REWARD_EARNED: 'REWARD_EARNED',
+  COMMUNITY_UPDATE: 'COMMUNITY_UPDATE',
   PROXIMITY_REWARD: 'proximity_reward',
   STREAK_SAVER: 'streak_saver',
   STREAK_MILESTONE: 'streak_milestone',
@@ -46,6 +47,8 @@ export const PUSH_CATEGORIES = {
   EVENT_REMINDER: 'event_reminder',
   WELCOME_ONBOARDING: 'welcome_onboarding',
 } as const;
+
+export type ClubNotificationPreference = 'all_posts' | 'announcements' | 'admin_posts' | 'off';
 
 export type PushCategoryType = (typeof PUSH_CATEGORIES)[keyof typeof PUSH_CATEGORIES] | string;
 

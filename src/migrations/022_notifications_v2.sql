@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS public.notification_preferences (
         "new_reward": true,
         "referral_reward": true,
         "event_reminder": true,
-        "welcome_onboarding": true
+        "welcome_onboarding": true,
+        "COMMUNITY_UPDATE": true
     }'::jsonb,
     email_categories JSONB NOT NULL DEFAULT '{
         "WEEKLY_ACTIVITY_SUMMARY": true,

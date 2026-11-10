@@ -396,6 +396,35 @@ export const updateClubDescription = async (req: Request, res: Response, next: N
   }
 };
 
+export const updateClubNotificationPreference = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const clubId = req.params.id;
+    const { notificationPreference } = req.body ?? {};
+
+    if (!notificationPreference || typeof notificationPreference !== 'string') {
+      res.status(400).json({
+        success: false,
+        message: 'notificationPreference is required (all_posts, announcements, admin_posts, off)',
+      });
+      return;
+    }
+
+    const result = await communityService.updateClubNotificationPreference(
+      clubId,
+      req.user!.sub,
+      notificationPreference.trim()
+    );
+
+    res.status(200).json(result);
+  } catch (error: any) {
+    if (error.status) {
+      res.status(error.status).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+};
+
 export const getClubMembers = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string) || 1;

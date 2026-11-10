@@ -22,6 +22,7 @@ import {
   resolveJoinRequest,
   getClubMembers,
   updateClubDescription,
+  updateClubNotificationPreference,
   updateClubCoverImage,
   getClubAnnouncements,
   createClubAnnouncement,
@@ -492,6 +493,42 @@ router.get('/clubs/:id', requireAuth, getClubById);
  *         description: Successfully updated description
  */
 router.patch('/clubs/:id/description', requireAuth, updateClubDescription);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/notification-preference:
+ *   patch:
+ *     summary: Update member club notification preference
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [notificationPreference]
+ *             properties:
+ *               notificationPreference:
+ *                 type: string
+ *                 enum: [all_posts, announcements, admin_posts, off]
+ *                 example: all_posts
+ *     responses:
+ *       200:
+ *         description: Notification preference updated successfully
+ *       400:
+ *         description: Invalid notification preference
+ *       404:
+ *         description: User is not a member of this club
+ */
+router.patch('/clubs/:id/notification-preference', requireAuth, updateClubNotificationPreference);
 
 /**
  * @openapi

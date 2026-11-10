@@ -22,6 +22,15 @@ import {
   PaginatedClubsResponse,
   CancelJoinRequestResult,
 } from '../models/communityModel';
+import {
+  handleClubAnnouncementEvent,
+  handleClubPostEvent,
+  handleJoinClubRequestEvent,
+  handleJoinClubApprovedEvent,
+  handleClubEventCreatedEvent,
+  handlePostLikeEvent,
+  handlePostCommentEvent,
+} from './notificationEventService';
 
 const POSTS_TABLE = 'community_posts';
 const LIKES_TABLE = 'community_likes';
@@ -224,6 +233,13 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
   }
 
   const resolved = resolvePostTags(data);
+
+  if (data.club_id) {
+    handleClubPostEvent(data.id).catch((err) =>
+      console.warn('[communityService] Error handling club post event:', err)
+    );
+  }
+
   return {
     id: data.id,
     title: data.title?.trim() || undefined,
@@ -402,6 +418,12 @@ export async function likePost(postId: string, userId: string): Promise<LikeResu
   // Unique violation = already liked; treat as success (idempotent)
   if (error && error.code !== '23505') throw error;
 
+  if (!error) {
+    handlePostLikeEvent(postId, userId).catch((err) =>
+      console.warn('[communityService] Error handling post like event:', err)
+    );
+  }
+
   return { liked: true, likesCount: await getLikesCount(postId) };
 }
 
@@ -526,6 +548,48 @@ async function updateClubMembersCount(clubId: string) {
   }
 }
 
+export async function updateClubNotificationPreference(
+  clubId: string,
+  userId: string,
+  preference: string
+): Promise<{ success: boolean; clubId: string; notificationPreference: string }> {
+  const allowed = ['all_posts', 'announcements', 'admin_posts', 'off'];
+  if (!allowed.includes(preference)) {
+    const err: any = new Error(`Invalid notification preference. Must be one of: ${allowed.join(', ')}`);
+    err.status = 400;
+    throw err;
+  }
+
+  // Verify that the user is an active member of this club
+  const { data: member, error: mErr } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('user_id, role')
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (mErr) throw mErr;
+  if (!member) {
+    const err: any = new Error('User is not a member of this club');
+    err.status = 404;
+    throw err;
+  }
+
+  const { error: updateErr } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .update({ notification_preference: preference })
+    .eq('club_id', clubId)
+    .eq('user_id', userId);
+
+  if (updateErr) throw updateErr;
+
+  return {
+    success: true,
+    clubId,
+    notificationPreference: preference,
+  };
+}
+
 export async function updateClubDescription(clubId: string, description: string, userId: string) {
   // First verify user is admin
   const { data: member } = await supabase
@@ -628,6 +692,13 @@ export async function addComment(
     .single();
 
   if (error) throw error;
+
+  if (data?.id) {
+    handlePostCommentEvent(data.id).catch((err) =>
+      console.warn('[communityService] Error handling post comment event:', err)
+    );
+  }
+
   return { id: data.id, createdAt: data.created_at };
 }
 
@@ -1039,6 +1110,12 @@ export async function createClubEvent(clubId: string, input: CreateEventInput, a
 
   if (error) throw error;
 
+  if (data?.id) {
+    handleClubEventCreatedEvent(data.id).catch((err) =>
+      console.warn('[communityService] Error handling club event event:', err)
+    );
+  }
+
   return {
     id: data.id,
     clubId: data.club_id,
@@ -1138,6 +1215,10 @@ export async function requestJoinClub(clubId: string, userId: string): Promise<v
       .eq('club_id', clubId)
       .eq('user_id', userId);
     if (error) throw error;
+
+    handleJoinClubRequestEvent(clubId, userId).catch((err) =>
+      console.warn('[communityService] Error handling join club request event:', err)
+    );
     return;
   }
 
@@ -1150,6 +1231,10 @@ export async function requestJoinClub(clubId: string, userId: string): Promise<v
     });
 
   if (error) throw error;
+
+  handleJoinClubRequestEvent(clubId, userId).catch((err) =>
+    console.warn('[communityService] Error handling join club request event:', err)
+  );
 }
 
 export async function cancelJoinRequest(
@@ -1275,6 +1360,10 @@ export async function resolveJoinRequest(clubId: string, adminUserId: string, ta
         role: 'member',
       }, { onConflict: 'club_id,user_id', ignoreDuplicates: true });
     if (insertError) throw insertError;
+
+    handleJoinClubApprovedEvent(clubId, targetUserId).catch((err) =>
+      console.warn('[communityService] Error handling join club approved event:', err)
+    );
   }
 }
 
@@ -1326,6 +1415,12 @@ export async function resolveBulkJoinRequests(
       .upsert(memberRows, { onConflict: 'club_id,user_id', ignoreDuplicates: true });
 
     if (insertError) throw insertError;
+
+    for (const uid of targetUserIds) {
+      handleJoinClubApprovedEvent(clubId, uid).catch((err) =>
+        console.warn('[communityService] Error handling bulk join approved event:', err)
+      );
+    }
   }
 
   const actionText = status === 'approved' ? 'approved' : 'rejected';
@@ -1448,6 +1543,10 @@ export async function createClubAnnouncement(
     });
 
   if (insertError) throw insertError;
+
+  handleClubAnnouncementEvent(announcementId).catch((err) =>
+    console.warn('[communityService] Error handling club announcement event:', err)
+  );
 
   // Mark as read for the creating admin
   try {

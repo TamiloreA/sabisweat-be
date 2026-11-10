@@ -415,4 +415,206 @@ export const notificationTemplates = {
   ): NotificationPayloadTemplate {
     return this.challengeCompletionGoalMet(challengeId, challengeTitle, undefined, imageUrl);
   },
+
+  // ─── Module 3: Community & Clubs Engine ─────────────────────────────
+
+  /**
+   * 1. Club Announcements
+   * Primary Title: [Club Name] shared a new announcement
+   * Fallback Title: [Announcement Title]
+   */
+  clubAnnouncementCreated(
+    clubId: string,
+    clubName: string | null | undefined,
+    announcementTitle: string | null | undefined,
+    content: string,
+    clubImageUrl?: string
+  ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(clubImageUrl);
+    const title = clubName && clubName.trim()
+      ? `${clubName.trim()} shared a new announcement`
+      : (announcementTitle?.trim() || 'New Announcement');
+    const body = content.trim().slice(0, 100).replace(/\.+$/, '');
+
+    return {
+      category: PUSH_CATEGORIES.COMMUNITY_UPDATE,
+      title,
+      body,
+      imageUrl: validImage,
+      data: {
+        screen: 'ClubAnnouncement',
+        params: { clubId },
+        ...(validImage ? { imageUrl: validImage } : {}),
+      },
+    };
+  },
+
+  /**
+   * 2. Standard Club Posts
+   * Title: [Post Title] if exists, else [Author Name] in [Club Name]
+   * Body: First 80–100 characters of post content
+   */
+  clubPostCreated(
+    postId: string,
+    clubId: string,
+    postTitle: string | null | undefined,
+    authorName: string,
+    clubName: string,
+    content: string,
+    imageUrl?: string
+  ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(imageUrl);
+    const title = postTitle && postTitle.trim()
+      ? postTitle.trim()
+      : `${authorName.trim()} in ${clubName.trim()}`;
+    const body = content.trim().slice(0, 100).replace(/\.+$/, '');
+
+    return {
+      category: PUSH_CATEGORIES.COMMUNITY_UPDATE,
+      title,
+      body,
+      imageUrl: validImage,
+      data: {
+        screen: 'PostDetail',
+        params: { postId, clubId },
+        ...(validImage ? { imageUrl: validImage } : {}),
+      },
+    };
+  },
+
+  /**
+   * 3. Join Club Request (Private / Invite-Only Clubs)
+   * Sent to Club Admins and Owner
+   */
+  joinClubRequest(
+    clubId: string,
+    userName: string,
+    clubName: string,
+    imageUrl?: string
+  ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(imageUrl);
+    return {
+      category: PUSH_CATEGORIES.COMMUNITY_UPDATE,
+      title: 'New Member Request',
+      body: `${userName.trim()} requested to join ${clubName.trim()}`,
+      imageUrl: validImage,
+      data: {
+        type: 'community_club_join_request',
+        screen: 'JoinClubRequest',
+        params: { clubId },
+        ...(validImage ? { imageUrl: validImage } : {}),
+      },
+    };
+  },
+
+  /**
+   * 4. Join Club Request Approved
+   * Sent to the user whose membership was approved
+   */
+  joinClubApproved(
+    clubId: string,
+    clubName: string,
+    imageUrl?: string
+  ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(imageUrl);
+    return {
+      category: PUSH_CATEGORIES.COMMUNITY_UPDATE,
+      title: `Welcome to ${clubName.trim()}`,
+      body: 'Your request to join has been approved. Start moving with the club',
+      imageUrl: validImage,
+      data: {
+        screen: 'ClubDetail',
+        params: { clubId },
+        ...(validImage ? { imageUrl: validImage } : {}),
+      },
+    };
+  },
+
+  /**
+   * 5. New Club Event Scheduled
+   * Sent to active club members
+   */
+  clubEventCreated(
+    eventId: string,
+    clubId: string,
+    eventTitle: string,
+    clubName: string,
+    eventDateStr: string,
+    imageUrl?: string
+  ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(imageUrl);
+    return {
+      category: PUSH_CATEGORIES.COMMUNITY_UPDATE,
+      title: eventTitle.trim(),
+      body: `New event scheduled in ${clubName.trim()} on ${eventDateStr}`,
+      imageUrl: validImage,
+      data: {
+        screen: 'ClubEventDetail',
+        params: { eventId, clubId },
+        ...(validImage ? { imageUrl: validImage } : {}),
+      },
+    };
+  },
+
+  /**
+   * 6. Post Likes (Grouped Anti-Spam)
+   * Single like: [User Name] liked your post
+   * Grouped likes (2+): [User Name] and [X] others liked your post
+   * Image: latest post image ONLY (no avatar fallback)
+   */
+  postLike(
+    postId: string,
+    latestLikerName: string,
+    otherLikersCount: number = 0,
+    postImageUrl?: string
+  ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(postImageUrl);
+    const body = otherLikersCount > 0
+      ? `${latestLikerName.trim()} and ${otherLikersCount} others liked your post`
+      : `${latestLikerName.trim()} liked your post`;
+
+    return {
+      category: PUSH_CATEGORIES.COMMUNITY_UPDATE,
+      title: 'Post',
+      body,
+      imageUrl: validImage,
+      data: {
+        screen: 'PostDetail',
+        params: { postId },
+        ...(validImage ? { imageUrl: validImage } : {}),
+      },
+    };
+  },
+
+  /**
+   * 7. Post Comments & Replies
+   * Top-level: [User Name] commented on your post
+   * Nested reply: [User Name] replied to your comment
+   * Image: latest post image ONLY (no avatar fallback)
+   */
+  postComment(
+    postId: string,
+    commenterName: string,
+    text: string,
+    isReply: boolean = false,
+    postImageUrl?: string
+  ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(postImageUrl);
+    const title = isReply
+      ? `${commenterName.trim()} replied to your comment`
+      : `${commenterName.trim()} commented on your post`;
+    const body = text.trim().slice(0, 80).replace(/\.+$/, '');
+
+    return {
+      category: PUSH_CATEGORIES.COMMUNITY_UPDATE,
+      title,
+      body,
+      imageUrl: validImage,
+      data: {
+        screen: 'PostDetail',
+        params: { postId },
+        ...(validImage ? { imageUrl: validImage } : {}),
+      },
+    };
+  },
 };

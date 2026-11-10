@@ -20,6 +20,12 @@ const TABLE_CLUB_MEMBERS = 'club_members';
 const TABLE_USER_DEVICES = 'user_devices';
 const TABLE_NOTIFICATIONS = 'notifications';
 const TABLE_ACHIEVEMENTS = 'user_achievements';
+const TABLE_COMMUNITY_POSTS = 'community_posts';
+const TABLE_COMMUNITY_LIKES = 'community_likes';
+const TABLE_COMMUNITY_COMMENTS = 'community_comments';
+const TABLE_CLUB_ANNOUNCEMENTS = 'club_announcements';
+const TABLE_CLUB_EVENTS = 'club_events';
+const TABLE_CLUB_JOIN_REQUESTS = 'club_join_requests';
 
 /**
  * Extracts local date and time parts from a Date object using an IANA timezone
@@ -902,4 +908,498 @@ async function awardChallengeBadge(userId: string, challengeId: string, badgeKey
   } catch (err) {
     // If table or unique constraint catches it, ignore duplicate
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Community & Clubs Engine Notification Events
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Dispatches notification when a club announcement is published
+ * Recipient matrix: members with 'announcements', 'admin_posts', or 'all_posts'
+ * Excludes author and 'off' preferences
+ */
+export async function handleClubAnnouncementEvent(announcementId: string): Promise<{ notifiedCount: number }> {
+  const { data: announcement, error: aErr } = await supabase
+    .from(TABLE_CLUB_ANNOUNCEMENTS)
+    .select('id, club_id, title, content, image_url, created_by')
+    .eq('id', announcementId)
+    .maybeSingle();
+
+  if (aErr || !announcement) return { notifiedCount: 0 };
+
+  const { data: club } = await supabase
+    .from(TABLE_CLUBS)
+    .select('id, name, profile_image_url, created_by')
+    .eq('id', announcement.club_id)
+    .maybeSingle();
+
+  if (!club) return { notifiedCount: 0 };
+
+  const { data: members, error: mErr } = await supabase
+    .from(TABLE_CLUB_MEMBERS)
+    .select('user_id, notification_preference')
+    .eq('club_id', announcement.club_id);
+
+  if (mErr || !members) return { notifiedCount: 0 };
+
+  const eligibleUserIds = members
+    .filter((m: any) => {
+      if (m.user_id === announcement.created_by) return false;
+      const pref = m.notification_preference || 'all_posts';
+      return pref === 'announcements' || pref === 'admin_posts' || pref === 'all_posts';
+    })
+    .map((m: any) => m.user_id);
+
+  const payload = notificationTemplates.clubAnnouncementCreated(
+    announcement.club_id,
+    club.name,
+    announcement.title,
+    announcement.content,
+    club.profile_image_url || announcement.image_url
+  );
+
+  let count = 0;
+  for (const userId of eligibleUserIds) {
+    const idempotencyKey = `club_announcement:${announcementId}:${userId}`;
+    const already = await hasNotification(userId, idempotencyKey);
+    if (already) continue;
+
+    await dispatchNotification({
+      userId,
+      type: payload.category,
+      title: payload.title,
+      body: payload.body,
+      imageUrl: payload.imageUrl,
+      data: payload.data,
+      idempotencyKey,
+    });
+    count++;
+  }
+
+  return { notifiedCount: count };
+}
+
+/**
+ * Dispatches notification when a standard club post is created
+ * Recipient matrix:
+ * - Admin/Owner author -> 'admin_posts' or 'all_posts'
+ * - Regular Member author -> 'all_posts'
+ * Excludes author and 'off' preferences
+ */
+export async function handleClubPostEvent(postId: string): Promise<{ notifiedCount: number }> {
+  const { data: post, error: pErr } = await supabase
+    .from(TABLE_COMMUNITY_POSTS)
+    .select('id, club_id, title, description, images_url, author_id')
+    .eq('id', postId)
+    .maybeSingle();
+
+  if (pErr || !post || !post.club_id) return { notifiedCount: 0 };
+
+  const { data: club } = await supabase
+    .from(TABLE_CLUBS)
+    .select('id, name, profile_image_url, created_by')
+    .eq('id', post.club_id)
+    .maybeSingle();
+
+  if (!club) return { notifiedCount: 0 };
+
+  const isOwner = club.created_by === post.author_id;
+  const { data: authorMember } = await supabase
+    .from(TABLE_CLUB_MEMBERS)
+    .select('role')
+    .eq('club_id', post.club_id)
+    .eq('user_id', post.author_id)
+    .maybeSingle();
+
+  const isAdminOrOwner = isOwner || authorMember?.role === 'admin';
+
+  const { data: members, error: mErr } = await supabase
+    .from(TABLE_CLUB_MEMBERS)
+    .select('user_id, notification_preference')
+    .eq('club_id', post.club_id);
+
+  if (mErr || !members) return { notifiedCount: 0 };
+
+  const eligibleUserIds = members
+    .filter((m: any) => {
+      if (m.user_id === post.author_id) return false;
+      const pref = m.notification_preference || 'all_posts';
+      if (pref === 'off') return false;
+      if (isAdminOrOwner) {
+        return pref === 'admin_posts' || pref === 'all_posts';
+      }
+      return pref === 'all_posts';
+    })
+    .map((m: any) => m.user_id);
+
+  const { data: authorProfile } = await supabase
+    .from(TABLE_PROFILES)
+    .select('first_name, last_name, username, photo_url, avatar_id')
+    .eq('id', post.author_id)
+    .maybeSingle();
+
+  const authorName =
+    [authorProfile?.first_name, authorProfile?.last_name].filter(Boolean).join(' ') ||
+    authorProfile?.username ||
+    'A member';
+
+  const authorAvatar = authorProfile?.photo_url || undefined;
+  const richImageUrl = authorAvatar || club.profile_image_url;
+
+  const payload = notificationTemplates.clubPostCreated(
+    post.id,
+    post.club_id,
+    post.title,
+    authorName,
+    club.name || 'Your Club',
+    post.description || '',
+    richImageUrl
+  );
+
+  let count = 0;
+  for (const userId of eligibleUserIds) {
+    const idempotencyKey = `club_post:${postId}:${userId}`;
+    const already = await hasNotification(userId, idempotencyKey);
+    if (already) continue;
+
+    await dispatchNotification({
+      userId,
+      type: payload.category,
+      title: payload.title,
+      body: payload.body,
+      imageUrl: payload.imageUrl,
+      data: payload.data,
+      idempotencyKey,
+    });
+    count++;
+  }
+
+  return { notifiedCount: count };
+}
+
+/**
+ * Dispatches notification when a user submits a request to join a private club
+ * Recipient: Active Club Admins and the Club Owner
+ */
+export async function handleJoinClubRequestEvent(
+  clubId: string,
+  requesterUserId: string
+): Promise<{ notifiedCount: number }> {
+  const { data: club } = await supabase
+    .from(TABLE_CLUBS)
+    .select('id, name, profile_image_url, created_by')
+    .eq('id', clubId)
+    .maybeSingle();
+
+  if (!club) return { notifiedCount: 0 };
+
+  const { data: requester } = await supabase
+    .from(TABLE_PROFILES)
+    .select('first_name, last_name, username, photo_url')
+    .eq('id', requesterUserId)
+    .maybeSingle();
+
+  const requesterName =
+    [requester?.first_name, requester?.last_name].filter(Boolean).join(' ') ||
+    requester?.username ||
+    'A mover';
+
+  const { data: admins } = await supabase
+    .from(TABLE_CLUB_MEMBERS)
+    .select('user_id')
+    .eq('club_id', clubId)
+    .eq('role', 'admin');
+
+  const adminUserIds = new Set<string>((admins || []).map((a: any) => a.user_id));
+  if (club.created_by) {
+    adminUserIds.add(club.created_by);
+  }
+  adminUserIds.delete(requesterUserId);
+
+  const richImage = requester?.photo_url || club.profile_image_url;
+  const payload = notificationTemplates.joinClubRequest(
+    clubId,
+    requesterName,
+    club.name || 'the club',
+    richImage
+  );
+
+  let count = 0;
+  for (const adminId of adminUserIds) {
+    const idempotencyKey = `join_request:${clubId}:${requesterUserId}:${adminId}`;
+    const already = await hasNotification(adminId, idempotencyKey);
+    if (already) continue;
+
+    await dispatchNotification({
+      userId: adminId,
+      type: 'community_club_join_request',
+      title: payload.title,
+      body: payload.body,
+      imageUrl: payload.imageUrl,
+      data: payload.data,
+      idempotencyKey,
+    });
+    count++;
+  }
+
+  return { notifiedCount: count };
+}
+
+/**
+ * Dispatches notification when a pending join request is approved
+ * Recipient: Only the approved user
+ */
+export async function handleJoinClubApprovedEvent(clubId: string, targetUserId: string): Promise<void> {
+  const { data: club } = await supabase
+    .from(TABLE_CLUBS)
+    .select('id, name, profile_image_url')
+    .eq('id', clubId)
+    .maybeSingle();
+
+  if (!club) return;
+
+  const idempotencyKey = `join_approved:${clubId}:${targetUserId}`;
+  const already = await hasNotification(targetUserId, idempotencyKey);
+  if (already) return;
+
+  const payload = notificationTemplates.joinClubApproved(
+    clubId,
+    club.name || 'the club',
+    club.profile_image_url
+  );
+
+  await dispatchNotification({
+    userId: targetUserId,
+    type: payload.category,
+    title: payload.title,
+    body: payload.body,
+    imageUrl: payload.imageUrl,
+    data: payload.data,
+    idempotencyKey,
+  });
+}
+
+/**
+ * Dispatches notification when a club event is scheduled
+ * Recipients: Active club members with preference != 'off'
+ */
+export async function handleClubEventCreatedEvent(eventId: string): Promise<{ notifiedCount: number }> {
+  const { data: event, error: eErr } = await supabase
+    .from(TABLE_CLUB_EVENTS)
+    .select('id, club_id, title, description, start_at, cover_image_url, created_by')
+    .eq('id', eventId)
+    .maybeSingle();
+
+  if (eErr || !event) return { notifiedCount: 0 };
+
+  const { data: club } = await supabase
+    .from(TABLE_CLUBS)
+    .select('id, name, profile_image_url')
+    .eq('id', event.club_id)
+    .maybeSingle();
+
+  if (!club) return { notifiedCount: 0 };
+
+  const { data: members, error: mErr } = await supabase
+    .from(TABLE_CLUB_MEMBERS)
+    .select('user_id, notification_preference')
+    .eq('club_id', event.club_id);
+
+  if (mErr || !members) return { notifiedCount: 0 };
+
+  const eligibleUserIds = members
+    .filter((m: any) => {
+      if (m.user_id === event.created_by) return false;
+      const pref = m.notification_preference || 'all_posts';
+      return pref !== 'off';
+    })
+    .map((m: any) => m.user_id);
+
+  const eventDate = new Date(event.start_at);
+  const eventDateStr = eventDate.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: eventDate.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
+  });
+
+  const richImage = event.cover_image_url || club.profile_image_url;
+  const payload = notificationTemplates.clubEventCreated(
+    eventId,
+    event.club_id,
+    event.title,
+    club.name || 'Your Club',
+    eventDateStr,
+    richImage
+  );
+
+  let count = 0;
+  for (const userId of eligibleUserIds) {
+    const idempotencyKey = `club_event:${eventId}:${userId}`;
+    const already = await hasNotification(userId, idempotencyKey);
+    if (already) continue;
+
+    await dispatchNotification({
+      userId,
+      type: payload.category,
+      title: payload.title,
+      body: payload.body,
+      imageUrl: payload.imageUrl,
+      data: payload.data,
+      idempotencyKey,
+    });
+    count++;
+  }
+
+  return { notifiedCount: count };
+}
+
+/**
+ * Dispatches notification when a post is liked
+ * Anti-spam grouping & throttling
+ * Image: Latest image from post's image collection ONLY (no avatar fallback)
+ */
+export async function handlePostLikeEvent(postId: string, likerUserId: string): Promise<void> {
+  const { data: post, error: pErr } = await supabase
+    .from(TABLE_COMMUNITY_POSTS)
+    .select('id, author_id, images_url')
+    .eq('id', postId)
+    .maybeSingle();
+
+  if (pErr || !post) return;
+
+  // Never notify self-likes
+  if (post.author_id === likerUserId) return;
+
+  const { data: likes } = await supabase
+    .from(TABLE_COMMUNITY_LIKES)
+    .select('user_id, created_at')
+    .eq('post_id', postId)
+    .neq('user_id', post.author_id)
+    .order('created_at', { ascending: false });
+
+  const validLikes = likes || [];
+  const totalLikers = validLikes.length;
+  if (totalLikers === 0) return;
+
+  const latestLikerId = validLikes[0].user_id;
+  const { data: likerProfile } = await supabase
+    .from(TABLE_PROFILES)
+    .select('first_name, last_name, username')
+    .eq('id', latestLikerId)
+    .maybeSingle();
+
+  const latestLikerName =
+    [likerProfile?.first_name, likerProfile?.last_name].filter(Boolean).join(' ') ||
+    likerProfile?.username ||
+    'Someone';
+
+  const otherLikersCount = Math.max(0, totalLikers - 1);
+
+  const images = Array.isArray(post.images_url) ? post.images_url : [];
+  const postLatestImage = images.length > 0 ? images[images.length - 1] : undefined;
+
+  const payload = notificationTemplates.postLike(
+    postId,
+    latestLikerName,
+    otherLikersCount,
+    postLatestImage
+  );
+
+  const windowKey = Math.floor(Date.now() / (10 * 60 * 1000));
+  const idempotencyKey = otherLikersCount === 0
+    ? `post_like:${postId}:${likerUserId}`
+    : `post_like_grouped:${postId}:${post.author_id}:${windowKey}:${otherLikersCount}`;
+
+  const already = await hasNotification(post.author_id, idempotencyKey);
+  if (already) return;
+
+  await dispatchNotification({
+    userId: post.author_id,
+    type: payload.category,
+    title: payload.title,
+    body: payload.body,
+    imageUrl: payload.imageUrl,
+    data: payload.data,
+    idempotencyKey,
+  });
+}
+
+/**
+ * Dispatches notification when a post receives a comment or reply
+ * Image: Latest image from post's image collection ONLY (no avatar fallback)
+ */
+export async function handlePostCommentEvent(commentId: string): Promise<void> {
+  const { data: comment, error: cErr } = await supabase
+    .from(TABLE_COMMUNITY_COMMENTS)
+    .select('id, post_id, user_id, text, parent_id')
+    .eq('id', commentId)
+    .maybeSingle();
+
+  if (cErr || !comment) return;
+
+  const { data: post } = await supabase
+    .from(TABLE_COMMUNITY_POSTS)
+    .select('id, author_id, images_url')
+    .eq('id', comment.post_id)
+    .maybeSingle();
+
+  if (!post) return;
+
+  let recipientUserId: string;
+  let isReply = false;
+
+  if (comment.parent_id) {
+    const { data: parentComment } = await supabase
+      .from(TABLE_COMMUNITY_COMMENTS)
+      .select('user_id')
+      .eq('id', comment.parent_id)
+      .maybeSingle();
+
+    if (!parentComment) return;
+    recipientUserId = parentComment.user_id;
+    isReply = true;
+  } else {
+    recipientUserId = post.author_id;
+    isReply = false;
+  }
+
+  // Never notify if user commented on or replied to their own content
+  if (recipientUserId === comment.user_id) return;
+
+  const { data: commenterProfile } = await supabase
+    .from(TABLE_PROFILES)
+    .select('first_name, last_name, username')
+    .eq('id', comment.user_id)
+    .maybeSingle();
+
+  const commenterName =
+    [commenterProfile?.first_name, commenterProfile?.last_name].filter(Boolean).join(' ') ||
+    commenterProfile?.username ||
+    'Someone';
+
+  const images = Array.isArray(post.images_url) ? post.images_url : [];
+  const postLatestImage = images.length > 0 ? images[images.length - 1] : undefined;
+
+  const payload = notificationTemplates.postComment(
+    comment.post_id,
+    commenterName,
+    comment.text,
+    isReply,
+    postLatestImage
+  );
+
+  const idempotencyKey = `post_comment:${commentId}:${recipientUserId}`;
+  const already = await hasNotification(recipientUserId, idempotencyKey);
+  if (already) return;
+
+  await dispatchNotification({
+    userId: recipientUserId,
+    type: payload.category,
+    title: payload.title,
+    body: payload.body,
+    imageUrl: payload.imageUrl,
+    data: payload.data,
+    idempotencyKey,
+  });
 }
