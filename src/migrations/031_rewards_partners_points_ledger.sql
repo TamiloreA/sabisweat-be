@@ -25,6 +25,16 @@ CREATE TABLE IF NOT EXISTS public.partners (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Ensure all columns exist if public.partners was previously created with an older schema
+ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS category VARCHAR(50);
+ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS country_code VARCHAR(10) DEFAULT 'NG';
+ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS points_balance INTEGER DEFAULT 0;
+ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS cover_image_url TEXT;
+ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS logo_image_url TEXT;
+ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';
+ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS authorization_code VARCHAR(50);
+ALTER TABLE public.partners ADD COLUMN IF NOT EXISTS code_used BOOLEAN DEFAULT FALSE;
+
 -- 2. Partner Gallery Images
 CREATE TABLE IF NOT EXISTS public.partner_images (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -39,9 +49,17 @@ CREATE TABLE IF NOT EXISTS public.partner_staff (
   partner_id UUID NOT NULL REFERENCES public.partners(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   role VARCHAR(20) DEFAULT 'staff' CHECK (role IN ('staff', 'admin', 'owner')),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  CONSTRAINT uq_partner_staff UNIQUE (partner_id, user_id)
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'uq_partner_staff'
+  ) THEN
+    ALTER TABLE public.partner_staff ADD CONSTRAINT uq_partner_staff UNIQUE (partner_id, user_id);
+  END IF;
+END $$;
 
 -- 4. Rewards Table
 CREATE TABLE IF NOT EXISTS public.rewards (
@@ -57,6 +75,11 @@ CREATE TABLE IF NOT EXISTS public.rewards (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Ensure all columns exist if public.rewards was previously created with an older schema
+ALTER TABLE public.rewards ADD COLUMN IF NOT EXISTS points_cost INTEGER DEFAULT 0;
+ALTER TABLE public.rewards ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE public.rewards ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active';
+
 -- 5. Points Transactions Ledger
 CREATE TABLE IF NOT EXISTS public.points_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -68,6 +91,10 @@ CREATE TABLE IF NOT EXISTS public.points_transactions (
   meta JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure all columns exist if public.points_transactions was previously created with an older schema
+ALTER TABLE public.points_transactions ADD COLUMN IF NOT EXISTS reference_id TEXT;
+ALTER TABLE public.points_transactions ADD COLUMN IF NOT EXISTS meta JSONB;
 
 -- 6. Reward Redemptions
 CREATE TABLE IF NOT EXISTS public.reward_redemptions (
@@ -83,7 +110,14 @@ CREATE TABLE IF NOT EXISTS public.reward_redemptions (
   completed_at TIMESTAMPTZ
 );
 
--- Indexes for high-performance lookups
+-- Ensure unique_identifier exists if public.reward_redemptions was previously created with an older schema
+ALTER TABLE public.reward_redemptions ADD COLUMN IF NOT EXISTS unique_identifier VARCHAR(100);
+ALTER TABLE public.reward_redemptions ADD COLUMN IF NOT EXISTS points_spent INTEGER DEFAULT 0;
+ALTER TABLE public.reward_redemptions ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending';
+ALTER TABLE public.reward_redemptions ADD COLUMN IF NOT EXISTS redeemed_by_staff_id UUID;
+ALTER TABLE public.reward_redemptions ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
+-- 7. Indexes for high-performance lookups
 CREATE INDEX IF NOT EXISTS idx_partners_category ON public.partners(category);
 CREATE INDEX IF NOT EXISTS idx_partners_city ON public.partners(city);
 CREATE INDEX IF NOT EXISTS idx_partners_status ON public.partners(status);
@@ -102,7 +136,7 @@ CREATE INDEX IF NOT EXISTS idx_reward_redemptions_partner ON public.reward_redem
 CREATE INDEX IF NOT EXISTS idx_reward_redemptions_user ON public.reward_redemptions(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reward_redemptions_nonce ON public.reward_redemptions(unique_identifier);
 
--- Permissions
+-- 8. Permissions
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.partners TO authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.partner_images TO authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.partner_staff TO authenticated, service_role;
