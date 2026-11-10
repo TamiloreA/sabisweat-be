@@ -313,7 +313,7 @@ describe('Community & Clubs Engine Notifications', () => {
       ];
 
       jest.spyOn(supabase, 'from').mockImplementation((table: string) => {
-        if (table === 'community_posts') {
+        if (table === 'posts' || table === 'community_posts') {
           return {
             select: () => ({
               eq: () => ({
@@ -394,7 +394,7 @@ describe('Community & Clubs Engine Notifications', () => {
       };
 
       jest.spyOn(supabase, 'from').mockImplementation((table: string) => {
-        if (table === 'community_posts') {
+        if (table === 'posts' || table === 'community_posts') {
           return {
             select: () => ({
               eq: () => ({
@@ -426,7 +426,7 @@ describe('Community & Clubs Engine Notifications', () => {
       ];
 
       jest.spyOn(supabase, 'from').mockImplementation((table: string) => {
-        if (table === 'community_posts') {
+        if (table === 'posts' || table === 'community_posts') {
           return {
             select: () => ({
               eq: () => ({
@@ -511,7 +511,7 @@ describe('Community & Clubs Engine Notifications', () => {
             }),
           } as any;
         }
-        if (table === 'community_posts') {
+        if (table === 'posts' || table === 'community_posts') {
           return {
             select: () => ({
               eq: () => ({
@@ -581,7 +581,7 @@ describe('Community & Clubs Engine Notifications', () => {
             }),
           } as any;
         }
-        if (table === 'community_posts') {
+        if (table === 'posts' || table === 'community_posts') {
           return {
             select: () => ({
               eq: () => ({

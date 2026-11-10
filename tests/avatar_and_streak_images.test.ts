@@ -301,7 +301,7 @@ describe('User Avatar & Streak Storage Image Resolver', () => {
       ];
 
       jest.spyOn(supabase, 'from').mockImplementation((table: string) => {
-        if (table === 'community_posts') {
+        if (table === 'posts' || table === 'community_posts') {
           return {
             select: () => ({
               eq: () => ({
@@ -435,7 +435,7 @@ describe('User Avatar & Streak Storage Image Resolver', () => {
       };
 
       jest.spyOn(supabase, 'from').mockImplementation((table: string) => {
-        if (table === 'community_posts') {
+        if (table === 'posts' || table === 'community_posts') {
           return {
             select: () => ({
               eq: () => ({
@@ -526,7 +526,7 @@ describe('User Avatar & Streak Storage Image Resolver', () => {
             }),
           } as any;
         }
-        if (table === 'community_posts') {
+        if (table === 'posts' || table === 'community_posts') {
           return {
             select: () => ({
               eq: () => ({

@@ -21,7 +21,7 @@ const TABLE_CLUB_MEMBERS = 'club_members';
 const TABLE_USER_DEVICES = 'user_devices';
 const TABLE_NOTIFICATIONS = 'notifications';
 const TABLE_ACHIEVEMENTS = 'user_achievements';
-const TABLE_COMMUNITY_POSTS = 'community_posts';
+const TABLE_COMMUNITY_POSTS = 'posts';
 const TABLE_COMMUNITY_LIKES = 'community_likes';
 const TABLE_COMMUNITY_COMMENTS = 'community_comments';
 const TABLE_CLUB_ANNOUNCEMENTS = 'club_announcements';
@@ -1005,13 +1005,25 @@ export async function handleClubAnnouncementEvent(announcementId: string): Promi
  * Excludes author and 'off' preferences
  */
 export async function handleClubPostEvent(postId: string): Promise<{ notifiedCount: number }> {
-  const { data: post, error: pErr } = await supabase
+  let { data: post, error: pErr } = await supabase
     .from(TABLE_COMMUNITY_POSTS)
-    .select('id, club_id, title, description, images_url, author_id')
+    .select('id, club_id, title, description, images_url, author_id, user_id')
     .eq('id', postId)
     .maybeSingle();
 
+  if (pErr && pErr.code === 'PGRST205') {
+    const fb = await supabase
+      .from('community_posts')
+      .select('id, club_id, title, description, images_url, author_id, user_id')
+      .eq('id', postId)
+      .maybeSingle();
+    post = fb.data;
+    pErr = fb.error;
+  }
+
   if (pErr || !post || !post.club_id) return { notifiedCount: 0 };
+
+  const postAuthorId = post.author_id || post.user_id;
 
   const { data: club } = await supabase
     .from(TABLE_CLUBS)
@@ -1021,12 +1033,12 @@ export async function handleClubPostEvent(postId: string): Promise<{ notifiedCou
 
   if (!club) return { notifiedCount: 0 };
 
-  const isOwner = club.created_by === post.author_id;
+  const isOwner = club.created_by === postAuthorId;
   const { data: authorMember } = await supabase
     .from(TABLE_CLUB_MEMBERS)
     .select('role')
     .eq('club_id', post.club_id)
-    .eq('user_id', post.author_id)
+    .eq('user_id', postAuthorId)
     .maybeSingle();
 
   const isAdminOrOwner = isOwner || authorMember?.role === 'admin';
@@ -1040,7 +1052,7 @@ export async function handleClubPostEvent(postId: string): Promise<{ notifiedCou
 
   const eligibleUserIds = members
     .filter((m: any) => {
-      if (m.user_id === post.author_id) return false;
+      if (m.user_id === postAuthorId) return false;
       const pref = m.notification_preference || 'all_posts';
       if (pref === 'off') return false;
       if (isAdminOrOwner) {
@@ -1053,7 +1065,7 @@ export async function handleClubPostEvent(postId: string): Promise<{ notifiedCou
   const { data: authorProfile } = await supabase
     .from(TABLE_PROFILES)
     .select('first_name, last_name, username, photo_url, photo_base64, avatar_id')
-    .eq('id', post.author_id)
+    .eq('id', postAuthorId)
     .maybeSingle();
 
   const authorName =
@@ -1278,22 +1290,34 @@ export async function handleClubEventCreatedEvent(eventId: string): Promise<{ no
  * Image: Latest image from post's image collection ONLY (no avatar fallback)
  */
 export async function handlePostLikeEvent(postId: string, likerUserId: string): Promise<void> {
-  const { data: post, error: pErr } = await supabase
+  let { data: post, error: pErr } = await supabase
     .from(TABLE_COMMUNITY_POSTS)
-    .select('id, author_id, images_url')
+    .select('id, author_id, user_id, images_url')
     .eq('id', postId)
     .maybeSingle();
 
+  if (pErr && pErr.code === 'PGRST205') {
+    const fb = await supabase
+      .from('community_posts')
+      .select('id, author_id, user_id, images_url')
+      .eq('id', postId)
+      .maybeSingle();
+    post = fb.data;
+    pErr = fb.error;
+  }
+
   if (pErr || !post) return;
 
+  const postAuthorId = post.author_id || post.user_id;
+
   // Never notify self-likes
-  if (post.author_id === likerUserId) return;
+  if (postAuthorId === likerUserId) return;
 
   const { data: likes } = await supabase
     .from(TABLE_COMMUNITY_LIKES)
     .select('user_id, created_at')
     .eq('post_id', postId)
-    .neq('user_id', post.author_id)
+    .neq('user_id', postAuthorId)
     .order('created_at', { ascending: false });
 
   const validLikes = likes || [];
@@ -1327,13 +1351,13 @@ export async function handlePostLikeEvent(postId: string, likerUserId: string): 
   const windowKey = Math.floor(Date.now() / (10 * 60 * 1000));
   const idempotencyKey = otherLikersCount === 0
     ? `post_like:${postId}:${likerUserId}`
-    : `post_like_grouped:${postId}:${post.author_id}:${windowKey}:${otherLikersCount}`;
+    : `post_like_grouped:${postId}:${postAuthorId}:${windowKey}:${otherLikersCount}`;
 
-  const already = await hasNotification(post.author_id, idempotencyKey);
+  const already = await hasNotification(postAuthorId, idempotencyKey);
   if (already) return;
 
   await dispatchNotification({
-    userId: post.author_id,
+    userId: postAuthorId,
     type: payload.category,
     title: payload.title,
     body: payload.body,
@@ -1356,13 +1380,24 @@ export async function handlePostCommentEvent(commentId: string): Promise<void> {
 
   if (cErr || !comment) return;
 
-  const { data: post } = await supabase
+  let { data: post } = await supabase
     .from(TABLE_COMMUNITY_POSTS)
-    .select('id, author_id, images_url')
+    .select('id, author_id, user_id, images_url')
     .eq('id', comment.post_id)
     .maybeSingle();
 
+  if (!post) {
+    const fb = await supabase
+      .from('community_posts')
+      .select('id, author_id, user_id, images_url')
+      .eq('id', comment.post_id)
+      .maybeSingle();
+    post = fb.data;
+  }
+
   if (!post) return;
+
+  const postAuthorId = post.author_id || post.user_id;
 
   let recipientUserId: string;
   let isReply = false;
@@ -1378,7 +1413,7 @@ export async function handlePostCommentEvent(commentId: string): Promise<void> {
     recipientUserId = parentComment.user_id;
     isReply = true;
   } else {
-    recipientUserId = post.author_id;
+    recipientUserId = postAuthorId;
     isReply = false;
   }
 

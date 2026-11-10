@@ -32,7 +32,7 @@ import {
   handlePostCommentEvent,
 } from './notificationEventService';
 
-const POSTS_TABLE = 'community_posts';
+const POSTS_TABLE = 'posts';
 const LIKES_TABLE = 'community_likes';
 const COMMENTS_TABLE = 'community_comments';
 const PROFILES_TABLE = 'profiles';
@@ -196,14 +196,15 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
   }
   const primaryTag = tagsList[0] || '';
 
-  const basePayload = {
+  const basePayload: Record<string, any> = {
     id: postId,
     title: input.title?.trim() || '',
     description: input.description,
     tag: primaryTag,
     images_url: imagesUrl,
     author_id: author.sub,
-    club_id: input.clubId ?? null,
+    user_id: author.sub,
+    club_id: (input.clubId && input.clubId.trim() !== '') ? input.clubId : null,
   };
 
   let insertRes = await supabase
@@ -216,6 +217,35 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
     insertRes = await supabase
       .from(POSTS_TABLE)
       .insert(basePayload)
+      .select()
+      .single();
+  }
+
+  if (insertRes.error && (insertRes.error.message?.includes('author_id') || insertRes.error.message?.includes('user_id'))) {
+    const fallbackPayload = { ...basePayload };
+    if (insertRes.error.message?.includes('author_id')) delete fallbackPayload.author_id;
+    if (insertRes.error.message?.includes('user_id')) delete fallbackPayload.user_id;
+    insertRes = await supabase
+      .from(POSTS_TABLE)
+      .insert(tagsList.length > 0 ? { ...fallbackPayload, tags: tagsList } : fallbackPayload)
+      .select()
+      .single();
+  }
+
+  if (insertRes.error && insertRes.error.code === 'PGRST205') {
+    const commPayload = {
+      id: postId,
+      title: input.title?.trim() || '',
+      description: input.description,
+      tag: primaryTag,
+      tags: tagsList,
+      images_url: imagesUrl,
+      author_id: author.sub,
+      club_id: (input.clubId && input.clubId.trim() !== '') ? input.clubId : null,
+    };
+    insertRes = await supabase
+      .from('community_posts')
+      .insert(commPayload)
       .select()
       .single();
   }
@@ -256,12 +286,23 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
   const from = (page - 1) * size;
   const to = from + size - 1;
 
-  const { data: posts, error } = await supabase
+  let { data: posts, error } = await supabase
     .from(POSTS_TABLE)
     .select('*')
     .is('club_id', null)
     .order('created_at', { ascending: false })
     .range(from, to);
+
+  if (error && error.code === 'PGRST205') {
+    const fb = await supabase
+      .from('community_posts')
+      .select('*')
+      .is('club_id', null)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+    posts = fb.data;
+    error = fb.error;
+  }
 
   if (error) throw error;
   if (!posts?.length) return { data: [], page, size };
@@ -269,7 +310,7 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
   const postIds = posts.map((post) => post.id);
 
   const [profileMap, likesRes, commentsRes] = await Promise.all([
-    fetchProfilesMap(posts.map((post) => post.author_id)),
+    fetchProfilesMap(posts.map((post) => post.author_id || post.user_id)),
     supabase.from(LIKES_TABLE).select('post_id, user_id').in('post_id', postIds),
     supabase.from(COMMENTS_TABLE).select('post_id').in('post_id', postIds),
   ]);
@@ -287,6 +328,8 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
   }
 
   const feed: FeedPost[] = posts.map((post: any) => {
+    const postAuthorId = post.author_id || post.user_id;
+    const authorProfile = profileMap.get(postAuthorId);
     const resolved = resolvePostTags(post);
     return {
       id: post.id,
@@ -298,10 +341,10 @@ export async function getFeed(page: number, size: number, userId?: string): Prom
       counts: {
         likes: likeCounts.get(post.id) ?? 0,
         comments: commentCounts.get(post.id) ?? 0,
-        shares: 0,
+        shares: post.shares_count ?? 0,
       },
       likedByMe: userId ? likedPostIds.has(post.id) : false,
-      author: mapAuthor(profileMap.get(post.author_id), post.author_id),
+      author: mapAuthor(authorProfile, postAuthorId),
       clubId: post.club_id,
       createdAt: post.created_at,
     };
@@ -326,12 +369,23 @@ export async function getClubPosts(clubId: string, page: number, size: number, u
   const from = (page - 1) * size;
   const to = from + size - 1;
 
-  const { data: posts, error } = await supabase
+  let { data: posts, error } = await supabase
     .from(POSTS_TABLE)
     .select('*')
     .eq('club_id', clubId)
     .order('created_at', { ascending: false })
     .range(from, to);
+
+  if (error && error.code === 'PGRST205') {
+    const fb = await supabase
+      .from('community_posts')
+      .select('*')
+      .eq('club_id', clubId)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+    posts = fb.data;
+    error = fb.error;
+  }
 
   if (error) throw error;
   if (!posts?.length) return { data: [], page, size };
@@ -339,7 +393,7 @@ export async function getClubPosts(clubId: string, page: number, size: number, u
   const postIds = posts.map((post) => post.id);
 
   const [profileMap, likesRes, commentsRes, pollOptionsRes, pollVotesRes] = await Promise.all([
-    fetchProfilesMap(posts.map((post) => post.author_id)),
+    fetchProfilesMap(posts.map((post) => post.author_id || post.user_id)),
     supabase.from(LIKES_TABLE).select('post_id, user_id').in('post_id', postIds),
     supabase.from(COMMENTS_TABLE).select('post_id').in('post_id', postIds),
     supabase.from(POLL_OPTIONS_TABLE).select('*').in('post_id', postIds),
@@ -373,6 +427,8 @@ export async function getClubPosts(clubId: string, page: number, size: number, u
   }
 
   const feed: FeedPost[] = posts.map((post: any) => {
+    const postAuthorId = post.author_id || post.user_id;
+    const authorProfile = profileMap.get(postAuthorId);
     const postOptions = (pollOptionsRes.data ?? []).filter((o) => o.post_id === post.id);
     const totalVotes = postOptions.reduce((acc, o) => acc + (voteCounts.get(o.id) ?? 0), 0);
     const options = postOptions.map((o) => {
@@ -397,10 +453,10 @@ export async function getClubPosts(clubId: string, page: number, size: number, u
       counts: {
         likes: likeCounts.get(post.id) ?? 0,
         comments: commentCounts.get(post.id) ?? 0,
-        shares: 0,
+        shares: post.shares_count ?? 0,
       },
       likedByMe: userId ? likedPostIds.has(post.id) : false,
-      author: mapAuthor(profileMap.get(post.author_id), post.author_id),
+      author: mapAuthor(authorProfile, postAuthorId),
       clubId: post.club_id,
       pollOptions: options.length > 0 ? options : undefined,
       createdAt: post.created_at,
@@ -473,11 +529,21 @@ export async function voteOnPoll(optionId: string, userId: string): Promise<void
 }
 
 export async function getCommunityPollResult(postId: string): Promise<CommunityPollResult | null> {
-  const { data: post, error: postError } = await supabase
+  let { data: post, error: postError } = await supabase
     .from(POSTS_TABLE)
     .select('id, title, club_id')
     .eq('id', postId)
-    .single();
+    .maybeSingle();
+
+  if (postError && postError.code === 'PGRST205') {
+    const fb = await supabase
+      .from('community_posts')
+      .select('id, title, club_id')
+      .eq('id', postId)
+      .maybeSingle();
+    post = fb.data;
+    postError = fb.error;
+  }
 
   if (postError || !post) return null;
 
@@ -757,16 +823,28 @@ export async function getComments(postId: string): Promise<PostComment[]> {
 }
 
 export async function getPostById(postId: string, userId?: string): Promise<FeedPost | null> {
-  const { data: post, error } = await supabase
+  let { data: post, error } = await supabase
     .from(POSTS_TABLE)
     .select('*')
     .eq('id', postId)
-    .single();
+    .maybeSingle();
+
+  if (error && error.code === 'PGRST205') {
+    const fb = await supabase
+      .from('community_posts')
+      .select('*')
+      .eq('id', postId)
+      .maybeSingle();
+    post = fb.data;
+    error = fb.error;
+  }
 
   if (error || !post) return null;
 
+  const postAuthorId = post.author_id || post.user_id;
+
   const [profileMap, likesRes, commentsRes] = await Promise.all([
-    fetchProfilesMap([post.author_id]),
+    fetchProfilesMap([postAuthorId]),
     supabase.from(LIKES_TABLE).select('user_id').eq('post_id', postId),
     supabase.from(COMMENTS_TABLE).select('id').eq('post_id', postId),
   ]);
@@ -784,10 +862,10 @@ export async function getPostById(postId: string, userId?: string): Promise<Feed
     counts: {
       likes: likes.length,
       comments: commentsRes.data?.length ?? 0,
-      shares: 0,
+      shares: post.shares_count ?? 0,
     },
     likedByMe: userId ? likes.some((like) => like.user_id === userId) : false,
-    author: mapAuthor(profileMap.get(post.author_id), post.author_id),
+    author: mapAuthor(profileMap.get(postAuthorId), postAuthorId),
     clubId: post.club_id,
     createdAt: post.created_at,
   };
@@ -1663,12 +1741,42 @@ export async function getMyPosts(
   const from = (page - 1) * size;
   const to = from + size - 1;
 
-  const { data: posts, count, error } = await supabase
+  let { data: posts, count, error } = await supabase
     .from(POSTS_TABLE)
     .select('*', { count: 'exact' })
-    .eq('author_id', userId)
+    .or(`author_id.eq.${userId},user_id.eq.${userId}`)
     .order('created_at', { ascending: false })
     .range(from, to);
+
+  if (error && error.code === 'PGRST205') {
+    const fb = await supabase
+      .from('community_posts')
+      .select('*', { count: 'exact' })
+      .eq('author_id', userId)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+    posts = fb.data;
+    count = fb.count;
+    error = fb.error;
+  } else if (error && (error.message?.includes('author_id') || error.message?.includes('user_id'))) {
+    let retry = await supabase
+      .from(POSTS_TABLE)
+      .select('*', { count: 'exact' })
+      .eq('author_id', userId)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+    if (retry.error) {
+      retry = await supabase
+        .from(POSTS_TABLE)
+        .select('*', { count: 'exact' })
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .range(from, to);
+    }
+    posts = retry.data;
+    count = retry.count;
+    error = retry.error;
+  }
 
   if (error) throw error;
   if (!posts?.length) {
