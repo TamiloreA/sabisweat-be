@@ -45,3 +45,4 @@ export async function uploadBase64Image(
   const { data } = supabase.storage.from(IMAGES_BUCKET).getPublicUrl(path);
   return data?.publicUrl || null;
 }
+

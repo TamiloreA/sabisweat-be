@@ -140,3 +140,4 @@ router.get('/', rewardController.getPartners);
 router.get('/:id', rewardController.getPartnerById);
 
 export default router;
+

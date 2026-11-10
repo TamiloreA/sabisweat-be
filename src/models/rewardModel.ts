@@ -131,3 +131,4 @@ export interface RedemptionResultData {
   statusLabel: 'Redeemed';
   message: string;
 }
+

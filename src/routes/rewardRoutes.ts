@@ -110,3 +110,4 @@ router.get('/', rewardController.getRewards);
 router.post('/:id/qr', rewardController.generateRewardQR);
 
 export default router;
+
