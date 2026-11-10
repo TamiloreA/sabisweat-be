@@ -7,7 +7,7 @@
 
 import { supabase } from '../config/database';
 import { dispatchNotification } from './notificationDispatcher';
-import { notificationTemplates } from './notificationTemplates';
+import { notificationTemplates, resolveChallengeNotificationImage } from './notificationTemplates';
 import { getCurrentStreak } from './streaksService';
 import { getLeaderboard } from './challengeService';
 
@@ -403,17 +403,20 @@ export async function handleChallengeCreatedEvent(challengeId: string): Promise<
     const already = await hasNotification(userId, idempotencyKey);
     if (already) continue;
 
+    const challengeImage = resolveChallengeNotificationImage(challenge);
+
     const payload = isClubPrivate
       ? notificationTemplates.clubChallengeCreated(
           challengeId,
           challenge.title,
           clubName,
-          challenge.hero_image_url || challenge.challenge_image || clubLogo
+          challengeImage
         )
       : notificationTemplates.publicChallengeCreated(
           challengeId,
           challenge.title,
-          challenge.hero_image_url || challenge.challenge_image || challenge.host_logo_url
+          clubName,
+          challengeImage
         );
 
     await dispatchNotification({
@@ -714,6 +717,7 @@ export async function disburseChallengeRewards(challengeId: string): Promise<{
   }
 
   const goalType = challenge.goal_type || 'steps_goal';
+  const challengeImage = resolveChallengeNotificationImage(challenge);
   let disbursedCount = 0;
 
   if (goalType === 'most_steps') {
@@ -733,12 +737,13 @@ export async function disburseChallengeRewards(challengeId: string): Promise<{
         // 2. Mark claimed
         await markParticipantClaimed(challengeId, entry.user.id);
         // 3. Dispatch Champion notification
-        const payload = notificationTemplates.challengeCompletionChampion(challengeId, challenge.title, coins);
+        const payload = notificationTemplates.challengeCompletionChampion(challengeId, challenge.title, coins, challengeImage);
         await dispatchNotification({
           userId: entry.user.id,
           type: payload.category,
           title: payload.title,
           body: payload.body,
+          imageUrl: payload.imageUrl,
           data: payload.data,
           idempotencyKey,
         });
@@ -751,25 +756,28 @@ export async function disburseChallengeRewards(challengeId: string): Promise<{
           challengeId,
           challenge.title,
           entry.rank,
-          coins
+          coins,
+          challengeImage
         );
         await dispatchNotification({
           userId: entry.user.id,
           type: payload.category,
           title: payload.title,
           body: payload.body,
+          imageUrl: payload.imageUrl,
           data: payload.data,
           idempotencyKey,
         });
         disbursedCount++;
       } else {
         // Rank 6 and above: No coins
-        const payload = notificationTemplates.challengeCompletionParticipant(challengeId, challenge.title);
+        const payload = notificationTemplates.challengeCompletionParticipant(challengeId, challenge.title, challengeImage);
         await dispatchNotification({
           userId: entry.user.id,
           type: payload.category,
           title: payload.title,
           body: payload.body,
+          imageUrl: payload.imageUrl,
           data: payload.data,
           idempotencyKey,
         });
@@ -831,13 +839,14 @@ export async function disburseChallengeRewards(challengeId: string): Promise<{
         const payload = notificationTemplates.challengeCompletionGoalMet(
           challengeId,
           challenge.title,
-          defaultCoins
+          challengeImage
         );
         await dispatchNotification({
           userId: p.user_id,
           type: payload.category,
           title: payload.title,
           body: payload.body,
+          imageUrl: payload.imageUrl,
           data: payload.data,
           idempotencyKey,
         });

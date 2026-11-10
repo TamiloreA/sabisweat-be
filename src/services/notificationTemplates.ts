@@ -23,8 +23,38 @@ export function sanitizeImageUrl(url: string | null | undefined): string | undef
   if (!url || typeof url !== 'string') return undefined;
   const trimmed = url.trim();
   if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return undefined;
-  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return undefined;
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://') && !trimmed.startsWith('data:image/')) return undefined;
   return trimmed;
+}
+
+/**
+ * Resolves challenge notification image priority:
+ * 1. Prioritize `challengeImage` whenever it is available.
+ * 2. If `challengeImage` is unavailable, fall back to the existing `heroImageBase64`.
+ * 3. If neither is available, send the notification without an image (returns undefined).
+ */
+export function resolveChallengeNotificationImage(
+  challenge: {
+    challenge_image?: string | null;
+    challengeImage?: string | null;
+    hero_image_base64?: string | null;
+    heroImageBase64?: string | null;
+    hero_image_url?: string | null;
+  } | null | undefined
+): string | undefined {
+  if (!challenge) return undefined;
+
+  const challengeImage = challenge.challengeImage || challenge.challenge_image;
+  if (challengeImage && typeof challengeImage === 'string' && challengeImage.trim().length > 0) {
+    return challengeImage.trim();
+  }
+
+  const heroImage = challenge.heroImageBase64 || challenge.hero_image_base64 || challenge.hero_image_url;
+  if (heroImage && typeof heroImage === 'string' && heroImage.trim().length > 0) {
+    return heroImage.trim();
+  }
+
+  return undefined;
 }
 
 export interface NotificationPayloadTemplate {
@@ -95,8 +125,8 @@ export const notificationTemplates = {
     const validImage = sanitizeImageUrl(celebrationImageUrl || process.env.CDN_STREAK_FLAME_CELEBRATION);
     return {
       category: PUSH_CATEGORIES.STREAK_ALERT,
-      title: 'Daily goal achieved',
-      body: `Amazing work! You've reached your ${formatNumber(goal)}-step goal and maintained your ${formatNumber(streakDays)}-day streak. Keep building on your progress`,
+      title: 'Daily Goal Achieved',
+      body: `You've reached ${formatNumber(goal)} step goal and kept your ${formatNumber(streakDays)}-day streak going 🥳`,
       imageUrl: validImage,
       data: {
         screen: 'HomeTab',
@@ -128,12 +158,30 @@ export const notificationTemplates = {
   /**
    * 1. Public Challenge Discovery (whoCanJoin = 'everyone')
    */
-  publicChallengeCreated(challengeId: string, challengeTitle: string, imageUrl?: string): NotificationPayloadTemplate {
-    const validImage = sanitizeImageUrl(imageUrl);
+  publicChallengeCreated(
+    challengeId: string,
+    challengeTitle: string,
+    clubNameOrImageUrl?: string,
+    imageUrl?: string
+  ): NotificationPayloadTemplate {
+    let clubName = 'Sabi Sweat';
+    let image = imageUrl;
+    if (clubNameOrImageUrl) {
+      if (
+        clubNameOrImageUrl.startsWith('http://') ||
+        clubNameOrImageUrl.startsWith('https://') ||
+        clubNameOrImageUrl.startsWith('data:image/')
+      ) {
+        image = clubNameOrImageUrl;
+      } else {
+        clubName = clubNameOrImageUrl;
+      }
+    }
+    const validImage = sanitizeImageUrl(image);
     return {
       category: PUSH_CATEGORIES.CHALLENGE_UPDATE,
-      title: 'A new challenge is here 🏆',
-      body: `${challengeTitle} is now open. View the challenge details and join the competition`,
+      title: 'New Challenge',
+      body: `${clubName} just created ${challengeTitle}. Check it out and join the competition.`,
       imageUrl: validImage,
       data: {
         screen: 'ChallengeOverview',
@@ -155,8 +203,8 @@ export const notificationTemplates = {
     const validImage = sanitizeImageUrl(imageUrl);
     return {
       category: PUSH_CATEGORIES.CHALLENGE_UPDATE,
-      title: `A new challenge from ${clubName}`,
-      body: `Your club has launched ${challengeTitle}. Check it out and take part with your fellow members`,
+      title: 'New Challenge',
+      body: `${clubName} just created ${challengeTitle}. Check it out and join the competition.`,
       imageUrl: validImage,
       data: {
         screen: 'ChallengeOverview',
@@ -169,14 +217,17 @@ export const notificationTemplates = {
   /**
    * 2. Challenge Milestone — 75% Completion
    */
-  challengeMilestone75(challengeId: string, challengeTitle: string): NotificationPayloadTemplate {
+  challengeMilestone75(challengeId: string, challengeTitle: string, imageUrl?: string): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(imageUrl);
     return {
       category: PUSH_CATEGORIES.CHALLENGE_UPDATE,
       title: "You're making great progress",
       body: `You've completed 75% of ${challengeTitle}. Keep going to reach your target`,
+      imageUrl: validImage,
       data: {
         screen: 'ChallengeOverview',
         params: { challengeId },
+        ...(validImage ? { imageUrl: validImage } : {}),
       },
     };
   },
@@ -263,15 +314,19 @@ export const notificationTemplates = {
   challengeCompletionChampion(
     challengeId: string,
     challengeTitle: string,
-    sabiCoins: number
+    sabiCoins: number,
+    imageUrl?: string
   ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(imageUrl);
     return {
       category: PUSH_CATEGORIES.REWARD_EARNED,
       title: 'Challenge Champion',
       body: `Congratulations! You finished first in ${challengeTitle}. ${formatNumber(sabiCoins)} SabiCoins have been added to your wallet`,
+      imageUrl: validImage,
       data: {
         screen: 'ChallengeLeaderboard',
         params: { challengeId },
+        ...(validImage ? { imageUrl: validImage } : {}),
       },
     };
   },
@@ -283,15 +338,19 @@ export const notificationTemplates = {
     challengeId: string,
     challengeTitle: string,
     rank: number,
-    sabiCoins: number
+    sabiCoins: number,
+    imageUrl?: string
   ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(imageUrl);
     return {
       category: PUSH_CATEGORIES.REWARD_EARNED,
       title: 'Congratulations on your top 5 finish',
       body: `You finished #${rank} in ${challengeTitle}. ${formatNumber(sabiCoins)} SabiCoins have been added to your wallet`,
+      imageUrl: validImage,
       data: {
         screen: 'ChallengeLeaderboard',
         params: { challengeId },
+        ...(validImage ? { imageUrl: validImage } : {}),
       },
     };
   },
@@ -302,15 +361,19 @@ export const notificationTemplates = {
    */
   challengeCompletionParticipant(
     challengeId: string,
-    challengeTitle: string
+    challengeTitle: string,
+    imageUrl?: string
   ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(imageUrl);
     return {
       category: PUSH_CATEGORIES.CHALLENGE_UPDATE,
       title: 'Challenge completed',
       body: `Well done on completing ${challengeTitle}. View the final leaderboard to see the results`,
+      imageUrl: validImage,
       data: {
         screen: 'ChallengeLeaderboard',
         params: { challengeId },
+        ...(validImage ? { imageUrl: validImage } : {}),
       },
     };
   },
@@ -321,16 +384,35 @@ export const notificationTemplates = {
   challengeCompletionGoalMet(
     challengeId: string,
     challengeTitle: string,
-    sabiCoins: number
+    sabiCoinsOrImageUrl?: number | string,
+    imageUrl?: string
   ): NotificationPayloadTemplate {
+    let image = imageUrl;
+    if (typeof sabiCoinsOrImageUrl === 'string') {
+      image = sabiCoinsOrImageUrl;
+    }
+    const validImage = sanitizeImageUrl(image);
     return {
       category: PUSH_CATEGORIES.REWARD_EARNED,
-      title: 'Challenge completed',
-      body: `Amazing work! You've completed ${challengeTitle}. ${formatNumber(sabiCoins)} SabiCoins and your completion badge have been added to your account`,
+      title: 'Challenge Reward',
+      body: `You've earned a reward for completing ${challengeTitle}. It's ready to claim.`,
+      imageUrl: validImage,
       data: {
         screen: 'ChallengeOverview',
         params: { challengeId },
+        ...(validImage ? { imageUrl: validImage } : {}),
       },
     };
+  },
+
+  /**
+   * 5. Challenge Reward
+   */
+  challengeReward(
+    challengeId: string,
+    challengeTitle: string,
+    imageUrl?: string
+  ): NotificationPayloadTemplate {
+    return this.challengeCompletionGoalMet(challengeId, challengeTitle, undefined, imageUrl);
   },
 };

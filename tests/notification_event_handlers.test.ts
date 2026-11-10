@@ -187,7 +187,7 @@ describe('Notification Event Handlers', () => {
         expect.objectContaining({
           userId: 'user-1',
           type: 'STREAK_ALERT',
-          title: 'Daily goal achieved',
+          title: 'Daily Goal Achieved',
           idempotencyKey: 'step_goal_100:user-1:2026-11-09',
         })
       );
