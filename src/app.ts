@@ -23,6 +23,9 @@ import searchRoutes from './routes/searchRoutes';
 import supportRoutes from './routes/supportRoutes';
 import userRoutes from './routes/userRoutes';
 import weeklyReportRoutes from './routes/weeklyReportRoutes';
+import rewardRoutes from './routes/rewardRoutes';
+import partnerRoutes from './routes/partnerRoutes';
+import partnerPortalRoutes from './routes/partnerPortalRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { apiRateLimiter } from './middleware/rateLimiter';
 
@@ -114,6 +117,21 @@ app.use('/api/v1/users', userRoutes);
 app.use('/weekly-report', weeklyReportRoutes);
 app.use('/v1/weekly-report', weeklyReportRoutes);
 app.use('/api/v1/weekly-report', weeklyReportRoutes);
+
+// Rewards — mounted at root, /v1, and /api/v1
+app.use('/rewards', rewardRoutes);
+app.use('/v1/rewards', rewardRoutes);
+app.use('/api/v1/rewards', rewardRoutes);
+
+// Partners — mounted at root, /v1, and /api/v1
+app.use('/partners', partnerRoutes);
+app.use('/v1/partners', partnerRoutes);
+app.use('/api/v1/partners', partnerRoutes);
+
+// Partner Portal — mounted at root, /v1, and /api/v1
+app.use('/partner-portal', partnerPortalRoutes);
+app.use('/v1/partner-portal', partnerPortalRoutes);
+app.use('/api/v1/partner-portal', partnerPortalRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'SabiSweat API is running' });

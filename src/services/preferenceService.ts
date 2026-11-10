@@ -34,6 +34,8 @@ export function normalizeCategoryKey(key: string): string {
     reward_earned: PUSH_CATEGORIES.REWARD_EARNED,
     push_rewards_earned: PUSH_CATEGORIES.REWARD_EARNED,
     rewards_earned: PUSH_CATEGORIES.REWARD_EARNED,
+    reward_redemption_completed: PUSH_CATEGORIES.REWARD_EARNED,
+    challenge_reward_earned: PUSH_CATEGORIES.REWARD_EARNED,
     community_update: PUSH_CATEGORIES.COMMUNITY_UPDATE,
     community_updates: PUSH_CATEGORIES.COMMUNITY_UPDATE,
     push_community_updates: PUSH_CATEGORIES.COMMUNITY_UPDATE,

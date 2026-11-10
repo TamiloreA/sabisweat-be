@@ -416,6 +416,27 @@ export const notificationTemplates = {
     return this.challengeCompletionGoalMet(challengeId, challengeTitle, undefined, imageUrl);
   },
 
+  /**
+   * 6. Partner Reward Redemption
+   * Title: Reward Redeemed
+   * Body: You spent [pointsCost] SabiCoins on [rewardTitle] at [partnerName].
+   */
+  rewardRedeemed(
+    pointsCost: number,
+    rewardTitle: string,
+    partnerName: string
+  ): NotificationPayloadTemplate {
+    return {
+      category: PUSH_CATEGORIES.REWARD_EARNED,
+      title: 'Reward Redeemed',
+      body: `You spent ${pointsCost} SabiCoins on ${rewardTitle} at ${partnerName}.`,
+      data: {
+        type: 'reward_redemption_completed',
+        screen: 'Ledger',
+      },
+    };
+  },
+
   // ─── Module 3: Community & Clubs Engine ─────────────────────────────
 
   /**
