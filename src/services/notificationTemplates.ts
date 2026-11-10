@@ -238,15 +238,19 @@ export const notificationTemplates = {
   leaderboardOvertake(
     challengeId: string,
     challengeTitle: string,
-    overtakerName: string
+    overtakerName: string,
+    overtakerAvatarUrl?: string
   ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(overtakerAvatarUrl);
     return {
       category: PUSH_CATEGORIES.CHALLENGE_UPDATE,
       title: 'Your leaderboard position has changed',
       body: `${overtakerName} has moved ahead of you in ${challengeTitle}. Check the leaderboard to see the latest standings`,
+      imageUrl: validImage,
       data: {
         screen: 'ChallengeLeaderboard',
         params: { challengeId },
+        ...(validImage ? { imageUrl: validImage } : {}),
       },
     };
   },

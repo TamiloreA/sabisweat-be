@@ -10,6 +10,7 @@ import { dispatchNotification } from './notificationDispatcher';
 import { notificationTemplates, resolveChallengeNotificationImage } from './notificationTemplates';
 import { getCurrentStreak } from './streaksService';
 import { getLeaderboard } from './challengeService';
+import { resolveUserAvatarUrl, resolveStreakNotificationImageUrl } from '../utils/avatarResolver';
 
 const TABLE_PROFILES = 'profiles';
 const TABLE_DAILY_STEPS = 'daily_steps';
@@ -139,7 +140,8 @@ export async function handleStepSyncEvents(
         const streakInfo = await getCurrentStreak(userId);
         const streakDays = streakInfo?.streakDays || 1;
 
-        const payload = notificationTemplates.dailyGoalCompleted(stepGoal, streakDays);
+        const streakImageUrl = resolveStreakNotificationImageUrl('daily_goal_completed', streakDays);
+        const payload = notificationTemplates.dailyGoalCompleted(stepGoal, streakDays, streakImageUrl);
         await dispatchNotification({
           userId,
           type: payload.category,
@@ -187,7 +189,8 @@ export async function handleStepSyncEvents(
     const key50 = `step_milestone_50:${userId}:${dateStr}`;
     const already50 = await hasNotification(userId, key50);
     if (!already50) {
-      const payload = notificationTemplates.stepMilestone50(currentSteps);
+      const streakImageUrl = resolveStreakNotificationImageUrl('step_milestone_50');
+      const payload = notificationTemplates.stepMilestone50(currentSteps, streakImageUrl);
       await dispatchNotification({
         userId,
         type: payload.category,
@@ -333,7 +336,8 @@ export async function processStreakAtRiskJob(now: Date = new Date()): Promise<{ 
       const remainingSteps = stepGoal - todaySteps;
       if (remainingSteps <= 0) continue;
 
-      const payload = notificationTemplates.streakAtRisk(streakDays, remainingSteps);
+      const streakImageUrl = resolveStreakNotificationImageUrl('streak_at_risk', streakDays);
+      const payload = notificationTemplates.streakAtRisk(streakDays, remainingSteps, streakImageUrl);
       await dispatchNotification({
         userId,
         type: payload.category,
@@ -541,7 +545,7 @@ async function evaluateActiveChallengesForUser(userId: string, _todaySteps: numb
 /**
  * Evaluates if the current user just overtook another participant on the club challenge leaderboard
  */
-async function evaluateLeaderboardOvertake(
+export async function evaluateLeaderboardOvertake(
   challengeId: string,
   challengeTitle: string,
   overtakerId: string
@@ -558,17 +562,28 @@ async function evaluateLeaderboardOvertake(
   if (!overtakenParticipant || overtakenParticipant.user.id === overtakerId) return;
 
   const overtakenUserId = overtakenParticipant.user.id;
+  await handleLeaderboardOvertakeEvent(challengeId, challengeTitle, overtakenUserId, overtakerId);
+}
 
+/**
+ * Dispatches notification when a user is overtaken on the leaderboard
+ */
+export async function handleLeaderboardOvertakeEvent(
+  challengeId: string,
+  challengeTitle: string,
+  overtakenUserId: string,
+  overtakerId: string
+): Promise<void> {
   // Throttling: Maximum once per 24 hours per user per challenge
   const todayStr = new Date().toISOString().slice(0, 10);
   const overtakeKey = `challenge_overtake:${challengeId}:${overtakenUserId}:${todayStr}`;
   const alreadySent = await hasNotification(overtakenUserId, overtakeKey);
   if (alreadySent) return;
 
-  // Fetch overtaker display name
+  // Fetch overtaker display name and avatar
   const { data: overtakerProfile } = await supabase
     .from(TABLE_PROFILES)
-    .select('first_name, last_name, username')
+    .select('first_name, last_name, username, photo_url, photo_base64, avatar_id')
     .eq('id', overtakerId)
     .single();
 
@@ -577,12 +592,14 @@ async function evaluateLeaderboardOvertake(
     overtakerProfile?.username ||
     'A fellow club member';
 
-  const payload = notificationTemplates.leaderboardOvertake(challengeId, challengeTitle, overtakerName);
+  const overtakerAvatar = resolveUserAvatarUrl(overtakerProfile);
+  const payload = notificationTemplates.leaderboardOvertake(challengeId, challengeTitle, overtakerName, overtakerAvatar);
   await dispatchNotification({
     userId: overtakenUserId,
     type: payload.category,
     title: payload.title,
     body: payload.body,
+    imageUrl: payload.imageUrl,
     data: payload.data,
     idempotencyKey: overtakeKey,
   });
@@ -1035,7 +1052,7 @@ export async function handleClubPostEvent(postId: string): Promise<{ notifiedCou
 
   const { data: authorProfile } = await supabase
     .from(TABLE_PROFILES)
-    .select('first_name, last_name, username, photo_url, avatar_id')
+    .select('first_name, last_name, username, photo_url, photo_base64, avatar_id')
     .eq('id', post.author_id)
     .maybeSingle();
 
@@ -1044,8 +1061,8 @@ export async function handleClubPostEvent(postId: string): Promise<{ notifiedCou
     authorProfile?.username ||
     'A member';
 
-  const authorAvatar = authorProfile?.photo_url || undefined;
-  const richImageUrl = authorAvatar || club.profile_image_url;
+  const authorAvatar = resolveUserAvatarUrl(authorProfile);
+  const richImageUrl = authorAvatar || club.profile_image_url || undefined;
 
   const payload = notificationTemplates.clubPostCreated(
     post.id,
@@ -1096,7 +1113,7 @@ export async function handleJoinClubRequestEvent(
 
   const { data: requester } = await supabase
     .from(TABLE_PROFILES)
-    .select('first_name, last_name, username, photo_url')
+    .select('first_name, last_name, username, photo_url, photo_base64, avatar_id')
     .eq('id', requesterUserId)
     .maybeSingle();
 
@@ -1117,7 +1134,8 @@ export async function handleJoinClubRequestEvent(
   }
   adminUserIds.delete(requesterUserId);
 
-  const richImage = requester?.photo_url || club.profile_image_url;
+  const requesterAvatar = resolveUserAvatarUrl(requester);
+  const richImage = requesterAvatar || club.profile_image_url || undefined;
   const payload = notificationTemplates.joinClubRequest(
     clubId,
     requesterName,
