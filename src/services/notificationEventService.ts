@@ -1069,8 +1069,8 @@ export async function handleClubPostEvent(postId: string): Promise<{ notifiedCou
     .maybeSingle();
 
   const authorName =
-    [authorProfile?.first_name, authorProfile?.last_name].filter(Boolean).join(' ') ||
     authorProfile?.username ||
+    [authorProfile?.first_name, authorProfile?.last_name].filter(Boolean).join(' ') ||
     'A member';
 
   const authorAvatar = resolveUserAvatarUrl(authorProfile);
@@ -1332,8 +1332,8 @@ export async function handlePostLikeEvent(postId: string, likerUserId: string): 
     .maybeSingle();
 
   const latestLikerName =
-    [likerProfile?.first_name, likerProfile?.last_name].filter(Boolean).join(' ') ||
     likerProfile?.username ||
+    [likerProfile?.first_name, likerProfile?.last_name].filter(Boolean).join(' ') ||
     'Someone';
 
   const otherLikersCount = Math.max(0, totalLikers - 1);

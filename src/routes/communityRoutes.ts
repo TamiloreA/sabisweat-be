@@ -28,7 +28,9 @@ import {
   createClubAnnouncement,
   reportClub,
   getMyPosts,
-  resolveBulkJoinRequests
+  resolveBulkJoinRequests,
+  updateClubSettings,
+  getClubLeaderboard,
 } from '../controllers/communityController';
 import { getClubChallenges, createChallenge } from '../controllers/challengeController';
 import { requireAuth } from '../middleware/auth';
@@ -564,6 +566,86 @@ router.patch('/clubs/:id/notification-preference', requireAuth, updateClubNotifi
  *         description: Forbidden - admin or creator only
  */
 router.patch('/clubs/:id/cover-image', requireAuth, updateClubCoverImage);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/settings:
+ *   patch:
+ *     summary: Update club administrative settings (admin/owner only)
+ *     description: Updates membersCanPost, showLeaderboard, isInviteOnly, requiresApproval. Regular members are forbidden (403). For public clubs, invite-only and requires-approval are ignored.
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               membersCanPost:
+ *                 type: boolean
+ *               showLeaderboard:
+ *                 type: boolean
+ *               isInviteOnly:
+ *                 type: boolean
+ *               requiresApproval:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Club settings updated successfully
+ *       403:
+ *         description: Forbidden - admin or owner only
+ *       404:
+ *         description: Club not found
+ */
+router.patch('/clubs/:id/settings', requireAuth, updateClubSettings);
+
+/**
+ * @openapi
+ * /community/clubs/{id}/leaderboard:
+ *   get:
+ *     summary: Get club monthly step leaderboard
+ *     description: Aggregates member steps starting from MAX(monthStart, joinedAt). Only active members can view. Enforces showLeaderboard and private club access.
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: month
+ *         schema:
+ *           type: string
+ *           example: "2026-11"
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: Club leaderboard retrieved successfully
+ *       403:
+ *         description: Forbidden - leaderboard disabled or not a member of private club
+ *       404:
+ *         description: Club not found
+ */
+router.get('/clubs/:id/leaderboard', requireAuth, getClubLeaderboard);
 
 /**
  * @openapi

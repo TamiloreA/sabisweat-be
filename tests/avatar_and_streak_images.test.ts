@@ -487,7 +487,7 @@ describe('User Avatar & Streak Storage Image Resolver', () => {
         expect.objectContaining({
           userId: 'post-owner',
           title: 'Post',
-          body: 'Liker User liked your post',
+          body: 'liker liked your post',
           // MUST be post image, NEVER liker avatar!
           imageUrl: 'https://cdn.sabisweat.app/original-post-image.jpg',
         })

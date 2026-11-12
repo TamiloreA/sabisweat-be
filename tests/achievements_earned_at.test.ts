@@ -117,9 +117,9 @@ describe('Achievements earnedAt Calculation & Persistence', () => {
     };
 
     mockDailySteps = [
-      { date: '2026-10-01', steps: 12000, synced_at: '2026-10-01T20:15:00.000Z' },
-      { date: '2026-10-02', steps: 15000, synced_at: '2026-10-02T19:30:00.000Z' }, // cumulative = 27k -> crosses 20k
-      { date: '2026-10-05', steps: 25000, synced_at: '2026-10-05T21:00:00.000Z' }, // cumulative = 52k -> crosses 50k
+      { date: '2026-10-01', steps: 120000, synced_at: '2026-10-01T20:15:00.000Z' },
+      { date: '2026-10-02', steps: 150000, synced_at: '2026-10-02T19:30:00.000Z' }, // cumulative = 270k -> crosses 200k & 250k
+      { date: '2026-10-05', steps: 100000, synced_at: '2026-10-05T21:00:00.000Z' }, // cumulative = 370k -> crosses 300k & 350k
     ];
 
     (streaksService.getCurrentStreak as jest.Mock).mockResolvedValue({
@@ -160,95 +160,95 @@ describe('Achievements earnedAt Calculation & Persistence', () => {
   describe('Monthly Badges earnedAt evaluation', () => {
     it('sets earnedAt to day X when threshold is crossed in date order', async () => {
       const summary = await getAchievementsSummary('user-oct-runner', 'Africa/Lagos');
-      const oct20k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_20k');
-      const oct50k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_50k');
-      const oct100k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_100k');
+      const oct200k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_200k');
+      const oct300k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_300k');
+      const oct400k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_400k');
 
-      expect(oct20k).toBeDefined();
-      expect(oct20k?.earned).toBe(true);
+      expect(oct200k).toBeDefined();
+      expect(oct200k?.earned).toBe(true);
       // Crossed on 2026-10-02 (synced_at was 2026-10-02T19:30:00.000Z)
-      expect(oct20k?.earnedAt).toBe('2026-10-02T19:30:00.000Z');
-      expect(oct20k?.earnedAt?.startsWith('2026-10')).toBe(true);
+      expect(oct200k?.earnedAt).toBe('2026-10-02T19:30:00.000Z');
+      expect(oct200k?.earnedAt?.startsWith('2026-10')).toBe(true);
 
-      expect(oct50k).toBeDefined();
-      expect(oct50k?.earned).toBe(true);
+      expect(oct300k).toBeDefined();
+      expect(oct300k?.earned).toBe(true);
       // Crossed on 2026-10-05 (synced_at was 2026-10-05T21:00:00.000Z)
-      expect(oct50k?.earnedAt).toBe('2026-10-05T21:00:00.000Z');
-      expect(oct50k?.earnedAt?.startsWith('2026-10')).toBe(true);
+      expect(oct300k?.earnedAt).toBe('2026-10-05T21:00:00.000Z');
+      expect(oct300k?.earnedAt?.startsWith('2026-10')).toBe(true);
 
-      // 100k not earned
-      expect(oct100k).toBeDefined();
-      expect(oct100k?.earned).toBe(false);
-      expect(oct100k?.earnedAt).toBeNull();
+      // 400k not earned (only reached 370k)
+      expect(oct400k).toBeDefined();
+      expect(oct400k?.earned).toBe(false);
+      expect(oct400k?.earnedAt).toBeNull();
     });
 
     it('assigns the same timestamp to multiple badges crossed on the same day', async () => {
-      // User logs 60,000 steps on 2026-10-02, crossing both 20k and 50k thresholds on that single day
+      // User logs 300,000 steps on 2026-10-02, crossing both 200k and 250k thresholds on that single day
       mockDailySteps = [
-        { date: '2026-10-01', steps: 5000, synced_at: '2026-10-01T12:00:00.000Z' },
-        { date: '2026-10-02', steps: 55000, synced_at: '2026-10-02T18:45:00.000Z' },
+        { date: '2026-10-01', steps: 50000, synced_at: '2026-10-01T12:00:00.000Z' },
+        { date: '2026-10-02', steps: 250000, synced_at: '2026-10-02T18:45:00.000Z' },
       ];
 
       const summary = await getAchievementsSummary('user-oct-runner', 'Africa/Lagos');
-      const oct20k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_20k');
-      const oct50k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_50k');
+      const oct200k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_200k');
+      const oct250k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_250k');
 
-      expect(oct20k?.earned).toBe(true);
-      expect(oct50k?.earned).toBe(true);
-      expect(oct20k?.earnedAt).toBe('2026-10-02T18:45:00.000Z');
-      expect(oct50k?.earnedAt).toBe('2026-10-02T18:45:00.000Z');
-      expect(oct20k?.earnedAt).toBe(oct50k?.earnedAt);
+      expect(oct200k?.earned).toBe(true);
+      expect(oct250k?.earned).toBe(true);
+      expect(oct200k?.earnedAt).toBe('2026-10-02T18:45:00.000Z');
+      expect(oct250k?.earnedAt).toBe('2026-10-02T18:45:00.000Z');
+      expect(oct200k?.earnedAt).toBe(oct250k?.earnedAt);
     });
 
     it('falls back to end of month for historical badges without day logs and never returns today/NOW', async () => {
-      // User has earned 20k in October historically in user_achievements, but no daily_steps rows exist
+      // User has earned 200k in October historically in user_achievements, but no daily_steps rows exist
       mockDailySteps = [];
       mockUserAchievements = [
         {
-          id: 'ach-oct-20k',
+          id: 'ach-oct-200k',
           category: 'monthly_badge',
-          badge_key: 'monthly_2026_10_20k',
+          badge_key: 'monthly_2026_10_200k',
           month_period: '2026-10',
           earned_at: null, // missing day log
-          progress_value: 20000,
+          progress_value: 200000,
         },
       ];
 
       const summary = await getAchievementsSummary('user-oct-runner', 'Africa/Lagos');
-      const oct20k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_20k');
+      const oct200k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_200k');
 
-      expect(oct20k?.earned).toBe(true);
+      expect(oct200k?.earned).toBe(true);
       // Fallback must be October 31st 23:59:59 UTC, NOT today in November
-      expect(oct20k?.earnedAt).toBe('2026-10-31T23:59:59.000Z');
-      expect(oct20k?.earnedAt?.startsWith('2026-10')).toBe(true);
-      expect(oct20k?.earnedAt?.startsWith('2026-11')).toBe(false);
+      expect(oct200k?.earnedAt).toBe('2026-10-31T23:59:59.000Z');
+      expect(oct200k?.earnedAt?.startsWith('2026-10')).toBe(true);
+      expect(oct200k?.earnedAt?.startsWith('2026-11')).toBe(false);
     });
 
     it('corrects an existing historical badge that was erroneously saved with a November timestamp', async () => {
       // This reproduces the exact bug report: an October badge saved with a November 7th timestamp
       mockDailySteps = [
-        { date: '2026-10-01', steps: 15000, synced_at: '2026-10-01T20:00:00.000Z' },
-        { date: '2026-10-03', steps: 10000, synced_at: '2026-10-03T17:00:00.000Z' },
+        { date: '2026-10-01', steps: 150000, synced_at: '2026-10-01T20:00:00.000Z' },
+        { date: '2026-10-03', steps: 100000, synced_at: '2026-10-03T17:00:00.000Z' },
       ];
       mockUserAchievements = [
         {
           id: 'ach-erroneous-oct',
           category: 'monthly_badge',
-          badge_key: 'monthly_2026_10_20k',
+          badge_key: 'monthly_2026_10_200k',
           month_period: '2026-10',
           earned_at: '2026-11-07T16:58:27.625Z', // BUGGY November timestamp
-          progress_value: 25000,
+          progress_value: 250000,
         },
       ];
 
       const summary = await getAchievementsSummary('user-oct-runner', 'Africa/Lagos');
-      const oct20k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_20k');
+      const oct200k = summary.monthlyBadges.items.find((i) => i.id === 'monthly_2026_10_200k');
 
-      expect(oct20k?.earned).toBe(true);
-      // Corrected to October 3rd when 20k was crossed
-      expect(oct20k?.earnedAt).toBe('2026-10-03T17:00:00.000Z');
-      expect(oct20k?.earnedAt?.startsWith('2026-10')).toBe(true);
-      expect(oct20k?.earnedAt?.startsWith('2026-11')).toBe(false);
+      expect(oct200k?.earned).toBe(true);
+      // Corrected to October 3rd when 200k was crossed
+      expect(oct200k?.earnedAt).toBe('2026-10-03T17:00:00.000Z');
+      expect(oct200k?.earnedAt?.startsWith('2026-10')).toBe(true);
+      expect(oct200k?.earnedAt?.startsWith('2026-11')).toBe(false);
     });
   });
 

@@ -54,6 +54,7 @@ export interface FeedPost {
   likedByMe: boolean;
   author: PostAuthor;
   clubId: string | null;
+  clubName?: string | null;
   pollOptions?: PollOption[] | null;
   createdAt: string;
 }
@@ -149,7 +150,45 @@ export interface ClubDetail {
   membersCount: number;
   joinStatus: 'joined' | 'pending' | 'none';
   isAdmin: boolean;
+  isPrivate: boolean;
+  membersCanPost: boolean;
+  showLeaderboard: boolean;
+  isInviteOnly: boolean;
+  requiresApproval: boolean;
   createdAt: string;
+}
+
+export interface ClubSettings {
+  membersCanPost?: boolean;
+  showLeaderboard?: boolean;
+  isInviteOnly?: boolean;
+  requiresApproval?: boolean;
+}
+
+export interface JoinClubResult {
+  joined: boolean;
+  membersCount: number;
+}
+
+export interface ClubLeaderboardEntry {
+  rank: number;
+  user: {
+    id: string;
+    username?: string;
+    displayName?: string;
+    photoUrl?: string;
+    avatarId?: string;
+  };
+  steps: number;
+}
+
+export interface ClubLeaderboardResponse {
+  page: number;
+  size: number;
+  total: number;
+  month: string;
+  currentUser: ClubLeaderboardEntry | null;
+  data: ClubLeaderboardEntry[];
 }
 
 export interface PaginatedClubsResponse {

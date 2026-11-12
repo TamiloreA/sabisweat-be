@@ -294,8 +294,14 @@ export const rsvpClubEvent = async (req: Request, res: Response, next: NextFunct
 
 export const requestJoinClub = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await communityService.requestJoinClub(req.params.id, req.user!.id);
-    res.status(200).json({ success: true, message: 'Join request sent' });
+    const result = await communityService.requestJoinClub(req.params.id, req.user!.id);
+    res.status(200).json({
+      success: true,
+      message: result.joined ? 'Joined club successfully' : 'Join request sent',
+      joined: result.joined,
+      membersCount: result.membersCount,
+      data: result,
+    });
   } catch (error) {
     next(error);
   }
@@ -537,6 +543,35 @@ export const getMyPosts = async (req: Request, res: Response, next: NextFunction
     next(error);
   }
 };
+
+export const updateClubSettings = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const club = await communityService.updateClubSettings(req.params.id, req.body, req.user!.id);
+    res.status(200).json({ success: true, data: club });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getClubLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const month = typeof req.query.month === 'string' ? req.query.month : undefined;
+    const page = req.query.page !== undefined ? Number(req.query.page) : 0;
+    const size = req.query.size !== undefined ? Number(req.query.size) : 20;
+
+    const result = await communityService.getClubLeaderboard(
+      req.params.id,
+      month,
+      page,
+      size,
+      req.user?.id
+    );
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+};
+
 
 
 

@@ -139,12 +139,15 @@ export interface LeaderboardEntry {
   };
   steps: number;
   score?: string;
+  successfulDays?: number;
+  totalDays?: number;
 }
 
 export interface LeaderboardResponse {
   page: number;
   size: number;
   total: number;
+  goalType?: string;
   currentUser?: LeaderboardEntry | null;
   data: LeaderboardEntry[];
 }

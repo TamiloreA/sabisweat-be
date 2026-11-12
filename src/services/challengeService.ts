@@ -923,10 +923,10 @@ export async function getLeaderboard(
   size: number = 20,
   currentUserId?: string
 ): Promise<LeaderboardResponse> {
-  // 1. Get challenge dates
+  // 1. Get challenge dates and goal configuration
   const { data: challenge, error: cError } = await supabase
     .from(CHALLENGES_TABLE)
-    .select('start_at, end_at')
+    .select('start_at, end_at, goal_type, goal_value, title, subtitle')
     .eq('id', challengeId)
     .single();
 
@@ -936,6 +936,10 @@ export async function getLeaderboard(
 
   const startDate = new Date(challenge.start_at).toISOString().split('T')[0];
   const endDate = new Date(challenge.end_at).toISOString().split('T')[0];
+  const goalType = normalizeGoalType(challenge.goal_type, challenge.title, challenge.subtitle);
+  const isDailyStep = goalType === 'daily_step';
+  const dailyTarget = typeof challenge.goal_value === 'number' && challenge.goal_value > 0 ? challenge.goal_value : 10000;
+  const challengeTotalDays = daysBetween(challenge.start_at, challenge.end_at);
 
   // 2. Get all active participants
   const { data: participants, error: pError } = await supabase
@@ -946,14 +950,13 @@ export async function getLeaderboard(
 
   if (pError) throw pError;
   if (!participants || participants.length === 0) {
-    return { page, size, total: 0, currentUser: null, data: [] };
+    return { page, size, total: 0, goalType, currentUser: null, data: [] };
   }
 
   const participantIds = participants.map((p) => p.user_id);
   const partMap = new Map(participants.map((p) => [p.user_id, p.joined_at]));
 
   // 3. Get daily_steps aggregated per user for the challenge period
-  // We fetch all steps rows for these users in the date range, then aggregate in-memory
   const { data: stepsData, error: sError } = await supabase
     .from(DAILY_STEPS_TABLE)
     .select('user_id, steps, date')
@@ -963,8 +966,12 @@ export async function getLeaderboard(
 
   if (sError) throw sError;
 
-  // Aggregate steps per user (only counting steps on or after they joined)
-  const stepsMap = new Map<string, number>();
+  // Aggregate daily steps and cumulative total per user (only counting on or after they joined)
+  const userDailyMap = new Map<string, Map<string, number>>();
+  for (const uid of participantIds) {
+    userDailyMap.set(uid, new Map());
+  }
+
   for (const row of stepsData ?? []) {
     const pJoinedAt = partMap.get(row.user_id);
     const challengeStartStr = new Date(challenge.start_at).toISOString().split('T')[0];
@@ -972,15 +979,51 @@ export async function getLeaderboard(
       ? new Date(Math.max(new Date(challenge.start_at).getTime(), new Date(pJoinedAt).getTime())).toISOString().split('T')[0]
       : challengeStartStr;
       
-    if (row.date >= effectiveStart) {
-      stepsMap.set(row.user_id, (stepsMap.get(row.user_id) || 0) + (row.steps || 0));
+    if (row.date >= effectiveStart && row.date <= endDate) {
+      const userDays = userDailyMap.get(row.user_id);
+      if (userDays) {
+        userDays.set(row.date, (userDays.get(row.date) || 0) + (row.steps || 0));
+      }
     }
   }
 
-  // Sort by total steps descending
-  const ranked = participantIds
-    .map((uid) => ({ userId: uid, steps: stepsMap.get(uid) || 0 }))
-    .sort((a, b) => b.steps - a.steps);
+  // Calculate metrics per user
+  const userMetrics = participantIds.map((uid) => {
+    const userDays = userDailyMap.get(uid);
+    let totalSteps = 0;
+    let successfulDays = 0;
+    if (userDays) {
+      for (const steps of userDays.values()) {
+        totalSteps += steps;
+        if (steps >= dailyTarget) {
+          successfulDays++;
+        }
+      }
+    }
+    return {
+      userId: uid,
+      steps: totalSteps,
+      successfulDays,
+    };
+  });
+
+  // Sort based on goalType: daily_step sorts by successfulDays DESC, then steps DESC
+  // steps_goal and most_steps sort by steps DESC
+  const ranked = userMetrics.sort((a, b) => {
+    if (isDailyStep) {
+      if (b.successfulDays !== a.successfulDays) {
+        return b.successfulDays - a.successfulDays;
+      }
+      if (b.steps !== a.steps) {
+        return b.steps - a.steps;
+      }
+      return a.userId.localeCompare(b.userId);
+    }
+    if (b.steps !== a.steps) {
+      return b.steps - a.steps;
+    }
+    return a.userId.localeCompare(b.userId);
+  });
 
   const total = ranked.length;
 
@@ -991,7 +1034,7 @@ export async function getLeaderboard(
   // 4. Find currentUser ranking object (if authenticated and participant with progress)
   let currentUser: LeaderboardEntry | null = null;
   const userIndex = currentUserId ? ranked.findIndex((r) => r.userId === currentUserId) : -1;
-  const hasUserProgress = userIndex !== -1 && ranked[userIndex].steps > 0;
+  const hasUserProgress = userIndex !== -1 && (isDailyStep ? ranked[userIndex].successfulDays > 0 || ranked[userIndex].steps > 0 : ranked[userIndex].steps > 0);
 
   // 5. Fetch profiles for page + current user (if needed)
   const profileIdsToFetch = [...pageData.map((r) => r.userId)];
@@ -1003,12 +1046,13 @@ export async function getLeaderboard(
 
   if (currentUserId && hasUserProgress) {
     const userRank = userIndex + 1;
-    const userSteps = ranked[userIndex].steps;
+    const userMetric = ranked[userIndex];
     currentUser = {
       rank: userRank,
       user: mapProfileToUser(profileMap.get(currentUserId), currentUserId),
-      steps: userSteps,
-      score: formatStepsAsScore(userSteps),
+      steps: userMetric.steps,
+      score: isDailyStep ? `${userMetric.successfulDays}/${challengeTotalDays}` : formatStepsAsScore(userMetric.steps),
+      ...(isDailyStep ? { successfulDays: userMetric.successfulDays, totalDays: challengeTotalDays } : {}),
     };
   }
 
@@ -1016,10 +1060,11 @@ export async function getLeaderboard(
     rank: start + i + 1,
     user: mapProfileToUser(profileMap.get(r.userId), r.userId),
     steps: r.steps,
-    score: formatStepsAsScore(r.steps),
+    score: isDailyStep ? `${r.successfulDays}/${challengeTotalDays}` : formatStepsAsScore(r.steps),
+    ...(isDailyStep ? { successfulDays: r.successfulDays, totalDays: challengeTotalDays } : {}),
   }));
 
-  return { page, size, total, currentUser, data: entries };
+  return { page, size, total, goalType, currentUser, data: entries };
 }
 
 /**

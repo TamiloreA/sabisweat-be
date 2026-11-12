@@ -31,13 +31,18 @@ const STREAK_MILESTONES = [
 ];
 
 const MONTHLY_THRESHOLDS = [
-  { threshold: 20000, label: '20k', tier: 'tier_1' as const },
-  { threshold: 50000, label: '50k', tier: 'tier_1' as const },
-  { threshold: 100000, label: '100k', tier: 'tier_1' as const },
   { threshold: 200000, label: '200k', tier: 'tier_1' as const },
+  { threshold: 250000, label: '250k', tier: 'tier_1' as const },
+  { threshold: 300000, label: '300k', tier: 'tier_1' as const },
   { threshold: 350000, label: '350k', tier: 'tier_1' as const },
-  { threshold: 400000, label: '400k', tier: 'tier_2' as const },
+  { threshold: 400000, label: '400k', tier: 'tier_1' as const },
+  { threshold: 450000, label: '450k', tier: 'tier_1' as const },
+  { threshold: 500000, label: '500k', tier: 'tier_1' as const },
+  { threshold: 600000, label: '600k', tier: 'tier_2' as const },
+  { threshold: 700000, label: '700k', tier: 'tier_2' as const },
   { threshold: 800000, label: '800k', tier: 'tier_2' as const },
+  { threshold: 900000, label: '900k', tier: 'tier_2' as const },
+  { threshold: 1000000, label: '1m', tier: 'tier_2' as const },
 ];
 
 const INVITE_MILESTONES = [
@@ -264,13 +269,15 @@ export async function getAchievementsSummary(
   }
   const earnedMap = new Map<string, ExistingAchievement>();
 
+  let rawAchievements: any[] = [];
   try {
     const { data: achievements } = await supabase
       .from(ACHIEVEMENTS_TABLE)
-      .select('id, category, badge_key, month_period, earned_at, progress_value')
+      .select('id, category, badge_key, month_period, earned_at, progress_value, target_value, metadata')
       .eq('user_id', userId);
 
-    for (const a of achievements ?? []) {
+    rawAchievements = achievements ?? [];
+    for (const a of rawAchievements) {
       const key = `${a.category}:${a.badge_key}:${a.month_period || ''}`;
       earnedMap.set(key, {
         id: a.id,
@@ -469,6 +476,24 @@ export async function getAchievementsSummary(
         tier: t.tier,
         earned,
         earnedAt,
+      });
+    }
+  }
+
+  // Preserve previously earned historical monthly badges that were awarded under legacy thresholds
+  const emittedBadgeIds = new Set(monthlyItems.map((item) => item.id));
+  for (const a of rawAchievements) {
+    if (a.category === 'monthly_badge' && a.earned_at && !emittedBadgeIds.has(a.badge_key)) {
+      const meta = (a.metadata && typeof a.metadata === 'object') ? a.metadata : {};
+      monthlyItems.push({
+        id: a.badge_key,
+        title: meta.title || `Monthly ${a.badge_key}`,
+        subtitle: meta.subtitle || 'Monthly Milestone',
+        month: a.month_period || a.earned_at.slice(0, 7),
+        threshold: a.target_value || 0,
+        tier: meta.tier || 'tier_1',
+        earned: true,
+        earnedAt: a.earned_at,
       });
     }
   }

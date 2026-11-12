@@ -478,7 +478,7 @@ describe('Community & Clubs Engine Notifications', () => {
         expect.objectContaining({
           userId: 'post-author',
           title: 'Post',
-          body: 'David O and 2 others liked your post',
+          body: 'davido and 2 others liked your post',
           // Must use latest post image!
           imageUrl: 'https://cdn.sabisweat.app/img2-latest.jpg',
         })

@@ -21,6 +21,10 @@ import {
   MyPostsResult,
   PaginatedClubsResponse,
   CancelJoinRequestResult,
+  ClubSettings,
+  JoinClubResult,
+  ClubLeaderboardEntry,
+  ClubLeaderboardResponse,
 } from '../models/communityModel';
 import {
   handleClubAnnouncementEvent,
@@ -45,6 +49,7 @@ const CLUB_EVENT_RSVPS_TABLE = 'club_event_rsvps';
 const CLUB_ANNOUNCEMENTS_TABLE = 'club_announcements';
 const CLUB_ANNOUNCEMENT_READS_TABLE = 'club_announcement_reads';
 const CLUB_REPORTS_TABLE = 'club_reports';
+const DAILY_STEPS_TABLE = 'daily_steps';
 const IMAGES_BUCKET = 'community-images';
 
 const DATA_URL_PREFIX = /^data:(image\/[\w+.-]+);base64,/;
@@ -174,6 +179,24 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
       .single();
     if (!membership) {
       throw new Error('You must be a member of this club to post.');
+    }
+
+    // Check if members are allowed to post (admins/owners always can)
+    if (membership.role === 'member') {
+      const { data: clubRow } = await supabase
+        .from(CLUBS_TABLE)
+        .select('members_can_post')
+        .eq('id', input.clubId)
+        .single();
+
+      if (clubRow && clubRow.members_can_post === false) {
+        throw { status: 403, message: 'Only admins and owners can post in this club' };
+      }
+
+      // Members cannot create polls — only admins/owners
+      if (input.pollOptions && input.pollOptions.length > 0) {
+        throw { status: 403, message: 'Only club admins can create polls' };
+      }
     }
   }
 
@@ -918,6 +941,7 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
     theme: input.theme ?? 'green',
     status: 'pending',
     created_by: author.sub,
+    is_private: input.isPrivate ?? true,
   };
 
   // Create club
@@ -974,6 +998,11 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
     membersCount: 1,
     joinStatus: 'joined',
     isAdmin: true,
+    isPrivate: clubData.is_private ?? true,
+    membersCanPost: clubData.members_can_post ?? false,
+    showLeaderboard: clubData.show_leaderboard ?? true,
+    isInviteOnly: clubData.is_invite_only ?? false,
+    requiresApproval: clubData.requires_approval ?? true,
     createdAt: clubData.created_at,
   };
 }
@@ -1081,6 +1110,11 @@ export async function getClubs(
     membersCount: memberCounts.get(club.id) ?? (typeof club.members_count === 'number' ? club.members_count : 0),
     joinStatus: (userId ? (myJoinedClubs.has(club.id) ? 'joined' : (myPendingRequests.has(club.id) ? 'pending' : 'none')) : 'none') as 'joined' | 'pending' | 'none',
     isAdmin: userId ? myAdminClubs.has(club.id) : false,
+    isPrivate: club.is_private ?? true,
+    membersCanPost: club.members_can_post ?? false,
+    showLeaderboard: club.show_leaderboard ?? true,
+    isInviteOnly: club.is_invite_only ?? false,
+    requiresApproval: club.requires_approval ?? true,
     createdAt: club.created_at,
   }));
 
@@ -1154,6 +1188,11 @@ export async function getClubById(clubId: string, userId?: string): Promise<Club
     membersCount: exactCount,
     joinStatus: userId ? (isMember ? 'joined' : (isPending ? 'pending' : 'none')) : 'none',
     isAdmin: userId ? isAdmin : false,
+    isPrivate: club.is_private ?? true,
+    membersCanPost: club.members_can_post ?? false,
+    showLeaderboard: club.show_leaderboard ?? true,
+    isInviteOnly: club.is_invite_only ?? false,
+    requiresApproval: club.requires_approval ?? true,
     createdAt: club.created_at,
   };
 }
@@ -1266,7 +1305,16 @@ export async function rsvpClubEvent(eventId: string, userId: string, rsvp: boole
   }
 }
 
-export async function requestJoinClub(clubId: string, userId: string): Promise<void> {
+export async function requestJoinClub(clubId: string, userId: string): Promise<JoinClubResult> {
+  // Fetch the club to check is_private
+  const { data: club, error: clubErr } = await supabase
+    .from(CLUBS_TABLE)
+    .select('id, is_private, name')
+    .eq('id', clubId)
+    .single();
+
+  if (clubErr || !club) throw { status: 404, message: 'Club not found' };
+
   const { data: existingMember } = await supabase
     .from(CLUB_MEMBERS_TABLE)
     .select('user_id')
@@ -1276,6 +1324,29 @@ export async function requestJoinClub(clubId: string, userId: string): Promise<v
 
   if (existingMember) throw new Error('User is already a member');
 
+  const isPublic = club.is_private === false;
+
+  if (isPublic) {
+    // Public club: immediately add as member
+    const { error: memberError } = await supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .insert({
+        club_id: clubId,
+        user_id: userId,
+        role: 'member',
+      });
+    if (memberError) throw memberError;
+
+    // Get updated members count
+    const { count } = await supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .select('*', { count: 'exact', head: true })
+      .eq('club_id', clubId);
+
+    return { joined: true, membersCount: count ?? 1 };
+  }
+
+  // Private club: go through join request flow
   const { data: existingRequest } = await supabase
     .from('club_join_requests')
     .select('status')
@@ -1297,7 +1368,13 @@ export async function requestJoinClub(clubId: string, userId: string): Promise<v
     handleJoinClubRequestEvent(clubId, userId).catch((err) =>
       console.warn('[communityService] Error handling join club request event:', err)
     );
-    return;
+
+    const { count } = await supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .select('*', { count: 'exact', head: true })
+      .eq('club_id', clubId);
+
+    return { joined: false, membersCount: count ?? 0 };
   }
 
   const { error } = await supabase
@@ -1313,6 +1390,13 @@ export async function requestJoinClub(clubId: string, userId: string): Promise<v
   handleJoinClubRequestEvent(clubId, userId).catch((err) =>
     console.warn('[communityService] Error handling join club request event:', err)
   );
+
+  const { count } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('*', { count: 'exact', head: true })
+    .eq('club_id', clubId);
+
+  return { joined: false, membersCount: count ?? 0 };
 }
 
 export async function cancelJoinRequest(
@@ -1830,6 +1914,19 @@ export async function getMyPosts(
     avatarId: authorProfile?.avatar_id ?? null,
   };
 
+  // Resolve club names for posts that belong to a club
+  const clubIds = [...new Set(posts.filter((p: any) => p.club_id).map((p: any) => p.club_id))];
+  const clubNameMap = new Map<string, string>();
+  if (clubIds.length > 0) {
+    const { data: clubRows } = await supabase
+      .from(CLUBS_TABLE)
+      .select('id, name')
+      .in('id', clubIds);
+    for (const club of clubRows ?? []) {
+      clubNameMap.set(club.id, club.name);
+    }
+  }
+
   const data: FeedPost[] = posts.map((post: any) => {
     const postOptions = (pollOptionsRes.data ?? []).filter((o) => o.post_id === post.id);
     let pollOptions = null;
@@ -1863,6 +1960,7 @@ export async function getMyPosts(
       likedByMe: likedPostIds.has(post.id),
       author,
       clubId: post.club_id ?? null,
+      clubName: post.club_id ? (clubNameMap.get(post.club_id) ?? null) : null,
       createdAt: post.created_at,
       pollOptions,
     };
@@ -1875,6 +1973,235 @@ export async function getMyPosts(
     total: count ?? 0,
   };
 }
+
+function mapLeaderboardUser(profile: ProfileRow | undefined, userId: string) {
+  const displayName = profile
+    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.username || 'Member'
+    : 'Member';
+  return {
+    id: userId,
+    username: profile?.username || undefined,
+    displayName,
+    photoUrl: profile?.photo_url || profile?.photo_base64 || undefined,
+    avatarId: profile?.avatar_id || undefined,
+  };
+}
+
+export async function updateClubSettings(
+  clubId: string,
+  settings: ClubSettings,
+  userId: string
+): Promise<ClubDetail> {
+  const { data: club, error: cErr } = await supabase
+    .from(CLUBS_TABLE)
+    .select('*')
+    .eq('id', clubId)
+    .single();
+
+  if (cErr || !club) {
+    throw { status: 404, message: 'Club not found' };
+  }
+
+  const { data: member } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const isCreator = club.created_by === userId;
+  const isAdminOrOwner = member?.role === 'admin' || member?.role === 'owner' || isCreator;
+
+  if (!isAdminOrOwner) {
+    throw { status: 403, message: 'Only club admins or owners can update club settings' };
+  }
+
+  const updates: Record<string, any> = {};
+
+  if (typeof settings.membersCanPost === 'boolean') {
+    updates.members_can_post = settings.membersCanPost;
+  }
+  if (typeof settings.showLeaderboard === 'boolean') {
+    updates.show_leaderboard = settings.showLeaderboard;
+  }
+
+  // For public clubs (is_private === false), is_invite_only and requires_approval are not applicable
+  const isPublic = club.is_private === false;
+  if (!isPublic) {
+    if (typeof settings.isInviteOnly === 'boolean') {
+      updates.is_invite_only = settings.isInviteOnly;
+    }
+    if (typeof settings.requiresApproval === 'boolean') {
+      updates.requires_approval = settings.requiresApproval;
+    }
+  }
+
+  if (Object.keys(updates).length > 0) {
+    const { error: uErr } = await supabase
+      .from(CLUBS_TABLE)
+      .update(updates)
+      .eq('id', clubId);
+
+    if (uErr) throw uErr;
+  }
+
+  const updatedClub = await getClubById(clubId, userId);
+  if (!updatedClub) {
+    throw { status: 404, message: 'Club not found after update' };
+  }
+  return updatedClub;
+}
+
+export async function getClubLeaderboard(
+  clubId: string,
+  monthStr?: string,
+  page: number = 0,
+  size: number = 20,
+  currentUserId?: string
+): Promise<ClubLeaderboardResponse> {
+  const { data: club, error: cErr } = await supabase
+    .from(CLUBS_TABLE)
+    .select('id, is_private, show_leaderboard, created_by')
+    .eq('id', clubId)
+    .single();
+
+  if (cErr || !club) {
+    throw { status: 404, message: 'Club not found' };
+  }
+
+  let isMember = false;
+  let isAdminOrOwner = false;
+
+  if (currentUserId) {
+    const { data: member } = await supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .select('role')
+      .eq('club_id', clubId)
+      .eq('user_id', currentUserId)
+      .maybeSingle();
+
+    const isCreator = club.created_by === currentUserId;
+    isAdminOrOwner = member?.role === 'admin' || member?.role === 'owner' || isCreator;
+    isMember = !!member;
+  }
+
+  // Private club authorization
+  if (club.is_private === true && !isMember && !isAdminOrOwner) {
+    throw { status: 403, message: 'You must be a member of this club to view the leaderboard' };
+  }
+
+  // Show leaderboard preference enforcement
+  if (club.show_leaderboard === false && !isAdminOrOwner) {
+    throw { status: 403, message: 'Leaderboard is disabled for this club' };
+  }
+
+  // Parse target month (YYYY-MM)
+  const now = new Date();
+  const currentMonthStr = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const targetMonth = monthStr && /^\d{4}-\d{2}$/.test(monthStr) ? monthStr : currentMonthStr;
+
+  const [yearStr, monthNumStr] = targetMonth.split('-');
+  const year = parseInt(yearStr, 10);
+  const monthNum = parseInt(monthNumStr, 10);
+  const monthStartDate = `${targetMonth}-01`;
+  const lastDay = new Date(Date.UTC(year, monthNum, 0)).getUTCDate();
+  const monthEndDate = `${targetMonth}-${String(lastDay).padStart(2, '0')}`;
+
+  // Fetch active club members
+  const { data: members, error: mErr } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('user_id, joined_at')
+    .eq('club_id', clubId);
+
+  if (mErr) throw mErr;
+
+  const memberList = members ?? [];
+  if (memberList.length === 0) {
+    return {
+      page,
+      size,
+      total: 0,
+      month: targetMonth,
+      currentUser: null,
+      data: [],
+    };
+  }
+
+  const memberIds = memberList.map((m: any) => m.user_id);
+  const memberEligibleStartMap = new Map<string, string>();
+  for (const m of memberList) {
+    const joinedDateStr = m.joined_at ? new Date(m.joined_at).toISOString().split('T')[0] : monthStartDate;
+    const eligibleStart = joinedDateStr > monthStartDate ? joinedDateStr : monthStartDate;
+    memberEligibleStartMap.set(m.user_id, eligibleStart);
+  }
+
+  // Fetch daily_steps for all members within the month
+  const { data: stepsRows, error: sErr } = await supabase
+    .from(DAILY_STEPS_TABLE)
+    .select('user_id, steps, date')
+    .in('user_id', memberIds)
+    .gte('date', monthStartDate)
+    .lte('date', monthEndDate);
+
+  if (sErr) throw sErr;
+
+  const stepsMap = new Map<string, number>();
+  for (const uid of memberIds) {
+    stepsMap.set(uid, 0);
+  }
+
+  for (const row of stepsRows ?? []) {
+    const eligibleStart = memberEligibleStartMap.get(row.user_id);
+    if (eligibleStart && row.date >= eligibleStart && row.date <= monthEndDate) {
+      stepsMap.set(row.user_id, (stepsMap.get(row.user_id) || 0) + (row.steps || 0));
+    }
+  }
+
+  // Sort deterministically: steps DESC, then userId ASC
+  const ranked = memberIds
+    .map((uid) => ({ userId: uid, steps: stepsMap.get(uid) || 0 }))
+    .sort((a, b) => (b.steps !== a.steps ? b.steps - a.steps : a.userId.localeCompare(b.userId)));
+
+  const total = ranked.length;
+  const start = Math.max(0, page) * size;
+  const pageData = ranked.slice(start, start + size);
+
+  // Fetch profile details
+  const profileIdsToFetch = [...pageData.map((r) => r.userId)];
+  if (currentUserId && !profileIdsToFetch.includes(currentUserId) && memberIds.includes(currentUserId)) {
+    profileIdsToFetch.push(currentUserId);
+  }
+
+  const profileMap = await fetchProfilesMap(profileIdsToFetch);
+
+  let currentUser: ClubLeaderboardEntry | null = null;
+  if (currentUserId && memberIds.includes(currentUserId)) {
+    const userIndex = ranked.findIndex((r) => r.userId === currentUserId);
+    if (userIndex !== -1) {
+      currentUser = {
+        rank: userIndex + 1,
+        user: mapLeaderboardUser(profileMap.get(currentUserId), currentUserId),
+        steps: ranked[userIndex].steps,
+      };
+    }
+  }
+
+  const data: ClubLeaderboardEntry[] = pageData.map((r, i) => ({
+    rank: start + i + 1,
+    user: mapLeaderboardUser(profileMap.get(r.userId), r.userId),
+    steps: r.steps,
+  }));
+
+  return {
+    page,
+    size,
+    total,
+    month: targetMonth,
+    currentUser,
+    data,
+  };
+}
+
 
 
 
