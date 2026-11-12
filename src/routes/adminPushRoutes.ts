@@ -11,6 +11,7 @@ import {
   sendTestPush,
   runCron,
   disburseRewards,
+  reconcileSabiLevel,
 } from '../controllers/notificationAdminController';
 
 const router = Router();
@@ -189,5 +190,27 @@ router.post('/cron-run', runCron);
  *         description: Disbursement failed
  */
 router.post('/challenges/:challengeId/disburse-rewards', disburseRewards);
+
+/**
+ * @openapi
+ * /admin/push/reconcile-sabi-level:
+ *   post:
+ *     summary: Reconcile Sabi Level milestones for a user and trigger push notifications if newly crossed
+ *     tags: [Admin Push]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [userId]
+ *             properties:
+ *               userId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Reconciliation completed
+ */
+router.post('/reconcile-sabi-level', reconcileSabiLevel);
 
 export default router;

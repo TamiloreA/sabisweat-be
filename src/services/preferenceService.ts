@@ -36,6 +36,8 @@ export function normalizeCategoryKey(key: string): string {
     rewards_earned: PUSH_CATEGORIES.REWARD_EARNED,
     reward_redemption_completed: PUSH_CATEGORIES.REWARD_EARNED,
     challenge_reward_earned: PUSH_CATEGORIES.REWARD_EARNED,
+    sabi_level_up: PUSH_CATEGORIES.REWARD_EARNED,
+    sabi_level: PUSH_CATEGORIES.REWARD_EARNED,
     community_update: PUSH_CATEGORIES.COMMUNITY_UPDATE,
     community_updates: PUSH_CATEGORIES.COMMUNITY_UPDATE,
     push_community_updates: PUSH_CATEGORIES.COMMUNITY_UPDATE,
@@ -64,6 +66,7 @@ const DEFAULT_PUSH_CATEGORIES: Record<string, boolean> = {
   referral_reward: true,
   event_reminder: true,
   welcome_onboarding: true,
+  sabi_level_up: true,
 };
 
 const DEFAULT_EMAIL_CATEGORIES: Record<string, boolean> = {

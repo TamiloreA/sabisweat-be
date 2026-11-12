@@ -79,11 +79,13 @@ export async function dispatchNotification(
   }
 
   // 2. Compute Authoritative Unread Count for Badge
-  const unreadMeta = await getUnreadCount(userId);
-  result.unreadCount = unreadMeta.unreadCount;
+  if (channel !== 'push_only') {
+    const unreadMeta = await getUnreadCount(userId);
+    result.unreadCount = unreadMeta.unreadCount;
+  }
 
   // 3. Dispatch Push Notification (if channel allows)
-  if (channel === 'all' || channel === 'push') {
+  if (channel === 'all' || channel === 'push' || channel === 'push_only') {
     const isPushEnabled = await isPushCategoryEnabled(userId, type);
 
     const dataPayload: Record<string, any> = data || {};
@@ -97,13 +99,12 @@ export async function dispatchNotification(
             to: device.expo_push_token,
             title,
             body,
-            badge: result.unreadCount, // Authoritative badge count
             sound: 'default',
             priority: 'high',
             channelId: 'default',
             data: {
               ...dataPayload,
-              notificationId: notificationId || dataPayload.notificationId,
+              ...(notificationId ? { notificationId } : (dataPayload.notificationId ? { notificationId: dataPayload.notificationId } : {})),
               type,
               screen: dataPayload.screen,
               params: dataPayload.params,
@@ -111,6 +112,10 @@ export async function dispatchNotification(
               ...(imageUrl ? { imageUrl } : {}),
             },
           };
+
+          if (channel !== 'push_only') {
+            msg.badge = result.unreadCount; // Authoritative badge count
+          }
 
           if (imageUrl) {
             msg.richContent = { image: imageUrl };
@@ -144,7 +149,7 @@ export async function dispatchNotification(
             payload_summary: {
               token: device.expo_push_token.slice(0, 20) + '...',
               platform: device.platform,
-              badge: result.unreadCount,
+              ...(channel !== 'push_only' ? { badge: result.unreadCount } : {}),
             },
             created_at: new Date().toISOString(),
           };

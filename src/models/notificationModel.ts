@@ -3,7 +3,7 @@
  * SabiSweat Push Notification Infrastructure V2
  */
 
-export type NotificationChannel = 'push' | 'email' | 'in_app';
+export type NotificationChannel = 'push' | 'email' | 'in_app' | 'push_only';
 
 export type PushPlatform = 'ios' | 'android' | 'web';
 
@@ -46,6 +46,10 @@ export const PUSH_CATEGORIES = {
   REFERRAL_REWARD: 'referral_reward',
   EVENT_REMINDER: 'event_reminder',
   WELCOME_ONBOARDING: 'welcome_onboarding',
+} as const;
+
+export const NOTIFICATION_TYPES = {
+  SABI_LEVEL_UP: 'sabi_level_up',
 } as const;
 
 export type ClubNotificationPreference = 'all_posts' | 'announcements' | 'admin_posts' | 'off';
@@ -212,7 +216,7 @@ export interface DispatchNotificationInput {
   body: string;
   imageUrl?: string;
   data?: NotificationDataPayload;
-  channel?: 'all' | 'push' | 'email' | 'in_app';
+  channel?: 'all' | 'push' | 'email' | 'in_app' | 'push_only';
   idempotencyKey?: string;
   expiresAt?: string;
   emailSubject?: string;

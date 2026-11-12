@@ -10,6 +10,7 @@ import {
   resolveWeekStartDate,
 } from '../models/userPreferencesModel';
 import { handleStepSyncEvents } from './notificationEventService';
+import { checkAndAwardSabiLevelMilestones } from './sabiLevelService';
 
 export interface HealthSyncPayload {
   date: string;
@@ -69,6 +70,11 @@ export const syncStepData = async (userId: string, payload: HealthSyncPayload, t
     console.warn('[healthService] Error processing step sync notification events:', err);
   });
 
+  // Asynchronously evaluate Sabi Level milestones
+  checkAndAwardSabiLevelMilestones(userId).catch((err) => {
+    console.warn('[healthService] Error evaluating Sabi Level milestones:', err);
+  });
+
   return { message: 'Sync successful', syncedAt: updateData.synced_at };
 };
 
@@ -124,6 +130,11 @@ export const syncStepDataBatch = async (
       console.warn('[healthService] Error processing batch step sync notification events:', err);
     });
   }
+
+  // Asynchronously evaluate Sabi Level milestones
+  checkAndAwardSabiLevelMilestones(userId).catch((err) => {
+    console.warn('[healthService] Error evaluating batch Sabi Level milestones:', err);
+  });
 
   return { message: 'Batch sync successful' };
 };

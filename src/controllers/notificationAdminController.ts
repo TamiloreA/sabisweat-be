@@ -8,6 +8,7 @@ import { dispatchNotification } from '../services/notificationDispatcher';
 import { sendPushChunked } from '../services/expoPushService';
 import { runAllCronTasks } from '../services/notificationCronService';
 import { disburseChallengeRewards } from '../services/notificationEventService';
+import { checkAndAwardSabiLevelMilestones } from '../services/sabiLevelService';
 
 export const dispatchToUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -95,6 +96,20 @@ export const disburseRewards = async (req: Request, res: Response, next: NextFun
       return;
     }
     const result = await disburseChallengeRewards(challengeId);
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const reconcileSabiLevel = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const userId = req.body?.userId || req.params?.userId;
+    if (!userId) {
+      res.status(400).json({ success: false, message: 'userId is required' });
+      return;
+    }
+    const result = await checkAndAwardSabiLevelMilestones(userId);
     res.status(200).json({ success: true, data: result });
   } catch (error) {
     next(error);

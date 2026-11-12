@@ -9,6 +9,7 @@
  */
 
 import { PUSH_CATEGORIES } from '../models/notificationModel';
+import { SabiLevel } from '../models/authModel';
 
 export function formatNumber(val: number | string | undefined | null): string {
   const num = typeof val === 'string' ? Number(val) : val;
@@ -639,6 +640,35 @@ export const notificationTemplates = {
         screen: 'PostDetail',
         params: { postId },
         ...(validImage ? { imageUrl: validImage } : {}),
+      },
+    };
+  },
+
+  /**
+   * 8. Sabi Level Up Milestones
+   * Push-only notifications when lifetime steps reach a new Sabi Level threshold.
+   */
+  sabiLevelUp(level: SabiLevel): NotificationPayloadTemplate {
+    const bodies: Record<string, string> = {
+      Mover:
+        "Congratulations! You've reached Mover. You've built momentum and made movement a regular part of your routine. Keep it going!",
+      Strider:
+        "Incredible work! You've reached Strider. Your consistency has made movement a meaningful part of your everyday lifestyle!",
+      Champion:
+        "You're now a Champion! Your discipline, dedication, and commitment to your goals have brought you this far. Keep pushing forward!",
+      Legend:
+        "Legendary! You've reached the highest Sabi Level. You've built a lifestyle driven by movement, discipline, and continuous progress. You've earned this!",
+    };
+
+    return {
+      category: PUSH_CATEGORIES.REWARD_EARNED,
+      title: 'Level Up! 🎉',
+      body: bodies[level] || `Congratulations! You've reached ${level}!`,
+      data: {
+        screen: 'SabiLevel',
+        params: {
+          level,
+        },
       },
     };
   },
