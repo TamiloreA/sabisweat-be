@@ -1974,6 +1974,20 @@ export async function getMyPosts(
   };
 }
 
+function formatDateInTimezone(dateInput: string | Date, timezone: string = 'Africa/Lagos'): string {
+  try {
+    const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  } catch {
+    return new Date(dateInput).toISOString().split('T')[0];
+  }
+}
+
 function mapLeaderboardUser(profile: ProfileRow | undefined, userId: string) {
   const displayName = profile
     ? [profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.username || 'Member'
@@ -2130,7 +2144,9 @@ export async function getClubLeaderboard(
   const memberIds = memberList.map((m: any) => m.user_id);
   const memberEligibleStartMap = new Map<string, string>();
   for (const m of memberList) {
-    const joinedDateStr = m.joined_at ? new Date(m.joined_at).toISOString().split('T')[0] : monthStartDate;
+    const joinedDateStr = m.joined_at ? formatDateInTimezone(m.joined_at, 'Africa/Lagos') : monthStartDate;
+    // Strict requirement: steps.date >= MAX(month_start, member.joined_at)
+    // Ensures late-arriving health sync data cannot backfill steps prior to joining
     const eligibleStart = joinedDateStr > monthStartDate ? joinedDateStr : monthStartDate;
     memberEligibleStartMap.set(m.user_id, eligibleStart);
   }

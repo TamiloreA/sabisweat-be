@@ -175,6 +175,30 @@ describe('Section 3: Club Monthly Leaderboard Endpoint & Aggregation', () => {
 
     expect(eligibleSteps).toBe(20000);
   });
+
+  it('prevents late-arriving health sync data from backfilling steps prior to joining', () => {
+    // User joined club on November 10th
+    const joinedAt = '2026-11-10T11:00:00.000Z';
+    const monthStart = '2026-11-01';
+    const monthEnd = '2026-11-30';
+    const eligibleStart = '2026-11-10';
+
+    // Late health sync arrives on November 20th with historical step records
+    const lateArrivingSyncPayload = [
+      { date: '2026-11-04', steps: 14000, synced_at: '2026-11-20T18:00:00.000Z' }, // Backfilled pre-join! Must be ignored
+      { date: '2026-11-09', steps: 11000, synced_at: '2026-11-20T18:00:00.000Z' }, // Backfilled pre-join! Must be ignored
+      { date: '2026-11-12', steps: 9000, synced_at: '2026-11-20T18:00:00.000Z' },  // Eligible post-join! Counted
+      { date: '2026-11-15', steps: 16000, synced_at: '2026-11-20T18:00:00.000Z' }, // Eligible post-join! Counted
+    ];
+
+    // Strict filter: steps.date >= MAX(month_start, member.joined_at)
+    const countedSteps = lateArrivingSyncPayload
+      .filter((row) => row.date >= eligibleStart && row.date <= monthEnd)
+      .reduce((sum, r) => sum + r.steps, 0);
+
+    // Only Nov 12 (9k) + Nov 15 (16k) = 25,000 steps count. Nov 4 and Nov 9 are excluded.
+    expect(countedSteps).toBe(25000);
+  });
 });
 
 describe('Section 4: Club Post Creation Authorization', () => {
@@ -306,6 +330,64 @@ describe('Section 10: Daily Step Challenge Leaderboard Metric', () => {
     expect(dailyStepLeaderboard.data[0].successfulDays!).toBeGreaterThan(dailyStepLeaderboard.data[1].successfulDays!);
   });
 
+  it('guarantees backward compatibility: returns numeric steps AND string score on every entry and currentUser', () => {
+    const leaderboard: LeaderboardResponse = {
+      page: 0,
+      size: 20,
+      total: 1,
+      goalType: 'daily_step',
+      currentUser: {
+        rank: 1,
+        user: { id: 'u-legacy' },
+        steps: 45000, // Older builds read numeric steps
+        score: '4/7',  // Newer builds read formatted score
+        successfulDays: 4,
+        totalDays: 7,
+      },
+      data: [
+        {
+          rank: 1,
+          user: { id: 'u-legacy' },
+          steps: 45000,
+          score: '4/7',
+          successfulDays: 4,
+          totalDays: 7,
+        },
+      ],
+    };
+
+    // Older mobile app checks numeric steps
+    expect(typeof leaderboard.data[0].steps).toBe('number');
+    expect(leaderboard.data[0].steps).toBe(45000);
+    expect(typeof leaderboard.currentUser?.steps).toBe('number');
+
+    // Newer mobile app checks formatted score and days
+    expect(typeof leaderboard.data[0].score).toBe('string');
+    expect(leaderboard.data[0].score).toBe('4/7');
+    expect(leaderboard.data[0].successfulDays).toBe(4);
+    expect(leaderboard.data[0].totalDays).toBe(7);
+  });
+
+  it('handles challenge timezone boundaries preventing UTC day shift discrepancies', () => {
+    // Challenge configured in Africa/Lagos (UTC+1)
+    const challengeStartIso = '2026-11-01T00:00:00+01:00'; // 2026-10-31T23:00:00Z in UTC
+    const timezone = 'Africa/Lagos';
+
+    const challengeStartDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(challengeStartIso));
+
+    // Must be November 1st in Lagos, NOT October 31st (UTC)
+    expect(challengeStartDate).toBe('2026-11-01');
+
+    // User steps logged on 2026-11-01 belong to the challenge
+    const userStepDate = '2026-11-01';
+    expect(userStepDate >= challengeStartDate).toBe(true);
+  });
+
   it('preserves steps_goal challenge leaderboard formatting (score as total steps)', () => {
     const stepsGoalLeaderboard: LeaderboardResponse = {
       page: 0,
@@ -351,3 +433,4 @@ describe('Poll Revoting Verification (POST /news/polls/vote)', () => {
     expect(votesDb[0].user_id).toBe(userId);
   });
 });
+

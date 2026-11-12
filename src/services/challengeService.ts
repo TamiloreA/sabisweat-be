@@ -109,6 +109,33 @@ function daysBetween(startStr: string, endStr: string): number {
   return Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
 }
 
+function resolveChallengeTimezone(challenge: any): string {
+  if (challenge?.timezone || challenge?.time_zone) {
+    return challenge.timezone || challenge.time_zone;
+  }
+  if (challenge?.country === 'United Kingdom' || challenge?.region === 'Greater London') {
+    return 'Europe/London';
+  }
+  if (challenge?.country === 'United States' || challenge?.country === 'USA') {
+    return 'America/New_York';
+  }
+  return 'Africa/Lagos';
+}
+
+function formatDateInTimezone(dateInput: string | Date, timezone: string): string {
+  try {
+    const d = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  } catch {
+    return new Date(dateInput).toISOString().split('T')[0];
+  }
+}
+
 function formatStepsAsScore(steps: number): string {
   return String(steps);
 }
@@ -232,13 +259,13 @@ export async function computeProgress(
   challengeRow: ChallengeRow,
   joinedAtStr?: string
 ): Promise<ComputeProgressResult> {
-  const challengeStart = new Date(challengeRow.start_at);
-  const joinedAt = joinedAtStr ? new Date(joinedAtStr) : challengeStart;
-  const effectiveStart = joinedAt > challengeStart ? joinedAt : challengeStart;
-  
-  const startDate = effectiveStart.toISOString().split('T')[0];
-  const endDate = new Date(challengeRow.end_at).toISOString().split('T')[0];
-  const today = new Date().toISOString().split('T')[0];
+  const challengeTimezone = resolveChallengeTimezone(challengeRow);
+  const challengeStartDateStr = formatDateInTimezone(challengeRow.start_at, challengeTimezone);
+  const challengeEndDateStr = formatDateInTimezone(challengeRow.end_at, challengeTimezone);
+  const joinedDateStr = joinedAtStr ? formatDateInTimezone(joinedAtStr, challengeTimezone) : challengeStartDateStr;
+  const startDate = joinedDateStr > challengeStartDateStr ? joinedDateStr : challengeStartDateStr;
+  const endDate = challengeEndDateStr;
+  const today = formatDateInTimezone(new Date(), challengeTimezone);
 
   // Fetch daily steps for the user within the challenge date range
   const { data: stepsData, error } = await supabase
@@ -934,8 +961,9 @@ export async function getLeaderboard(
     throw { status: 404, message: 'Challenge not found' };
   }
 
-  const startDate = new Date(challenge.start_at).toISOString().split('T')[0];
-  const endDate = new Date(challenge.end_at).toISOString().split('T')[0];
+  const challengeTimezone = resolveChallengeTimezone(challenge);
+  const startDate = formatDateInTimezone(challenge.start_at, challengeTimezone);
+  const endDate = formatDateInTimezone(challenge.end_at, challengeTimezone);
   const goalType = normalizeGoalType(challenge.goal_type, challenge.title, challenge.subtitle);
   const isDailyStep = goalType === 'daily_step';
   const dailyTarget = typeof challenge.goal_value === 'number' && challenge.goal_value > 0 ? challenge.goal_value : 10000;
@@ -974,10 +1002,8 @@ export async function getLeaderboard(
 
   for (const row of stepsData ?? []) {
     const pJoinedAt = partMap.get(row.user_id);
-    const challengeStartStr = new Date(challenge.start_at).toISOString().split('T')[0];
-    const effectiveStart = pJoinedAt 
-      ? new Date(Math.max(new Date(challenge.start_at).getTime(), new Date(pJoinedAt).getTime())).toISOString().split('T')[0]
-      : challengeStartStr;
+    const pJoinedDateStr = pJoinedAt ? formatDateInTimezone(pJoinedAt, challengeTimezone) : startDate;
+    const effectiveStart = pJoinedDateStr > startDate ? pJoinedDateStr : startDate;
       
     if (row.date >= effectiveStart && row.date <= endDate) {
       const userDays = userDailyMap.get(row.user_id);
