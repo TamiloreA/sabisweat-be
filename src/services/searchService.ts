@@ -529,7 +529,7 @@ async function getClubMemberCount(clubId: string, fallbackCount: number = 0): Pr
 
 export async function search(params: SearchQueryParams): Promise<SearchResponse> {
   const startTime = Date.now();
-  const { q, types, limit, offset, country, region } = params;
+  const { q, types, limit, offset, country, region, excludeClubId } = params;
 
   const results: SearchResults = {};
 
@@ -610,6 +610,7 @@ export async function search(params: SearchQueryParams): Promise<SearchResponse>
             endDate,
             participantCount: participantCounts[idx],
             status,
+            isOfficial: Boolean(c.is_official),
           };
         });
 
@@ -642,6 +643,10 @@ export async function search(params: SearchQueryParams): Promise<SearchResponse>
           if (club.deleted_at != null) return false;
           // Exclude private clubs
           if (club.is_private === true || club.visible === false) {
+            return false;
+          }
+          // Exclude specified club if excludeClubId provided (e.g. primary host club)
+          if (excludeClubId && (club.id === excludeClubId || club.tag === excludeClubId)) {
             return false;
           }
           return true;
@@ -681,6 +686,7 @@ export async function search(params: SearchQueryParams): Promise<SearchResponse>
             memberCount: memberCounts[idx],
             clubTheme: club.theme || 'green',
             status: 'active',
+            isOfficial: Boolean(club.is_official),
           };
         });
 

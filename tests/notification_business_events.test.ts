@@ -104,16 +104,16 @@ describe('Notification Business Events & Templates', () => {
     it('generates Morning Kickoff with > 0 steps', () => {
       const t = notificationTemplates.morningKickoff(1250);
       expect(t.category).toBe(PUSH_CATEGORIES.DAILY_STEP_REMINDER);
-      expect(t.title).toBe("You're off to a great start");
-      expect(t.body).toBe("You've already taken 1,250 steps today. Keep going towards your daily goal");
+      expect(t.title).toBe('Off to a great start 🌟');
+      expect(t.body).toBe('You’ve taken 1,250 steps today. Keep moving towards your daily goal.');
       expect(t.data.screen).toBe('HomeTab');
     });
 
     it('generates 50% Step Goal Milestone with optional flame image', () => {
       const t = notificationTemplates.stepMilestone50(5120, 'https://cdn.sabisweat.app/streak-flame.png');
       expect(t.category).toBe(PUSH_CATEGORIES.DAILY_STEP_REMINDER);
-      expect(t.title).toBe("You're halfway to your goal");
-      expect(t.body).toBe("You've reached 5,120 steps today. Keep up the momentum and take the next step towards your target");
+      expect(t.title).toBe('Halfway to your goal 💪');
+      expect(t.body).toBe('You’ve reached 5,120 steps today. Keep up the momentum and take the next step towards your goal.');
       expect(t.imageUrl).toBe('https://cdn.sabisweat.app/streak-flame.png');
       expect(t.data.imageUrl).toBe('https://cdn.sabisweat.app/streak-flame.png');
       expect(t.data.screen).toBe('HomeTab');
@@ -122,8 +122,8 @@ describe('Notification Business Events & Templates', () => {
     it('generates 80% Step Goal Milestone without image', () => {
       const t = notificationTemplates.stepMilestone80(1800);
       expect(t.category).toBe(PUSH_CATEGORIES.DAILY_STEP_REMINDER);
-      expect(t.title).toBe("You're nearly there");
-      expect(t.body).toBe("Just 1,800 steps to reach your daily goal. You're making great progress");
+      expect(t.title).toBe('Almost there 💪');
+      expect(t.body).toBe('Just 1,800 steps to reach your daily goal. You’re making great progress.');
       expect(t.data.screen).toBe('HomeTab');
       expect(t.imageUrl).toBeUndefined();
     });
@@ -131,8 +131,8 @@ describe('Notification Business Events & Templates', () => {
     it('generates 100% Daily Goal Completed with celebratory flame', () => {
       const t = notificationTemplates.dailyGoalCompleted(10000, 14, 'https://cdn.sabisweat.app/flame-celebrate.png');
       expect(t.category).toBe(PUSH_CATEGORIES.STREAK_ALERT);
-      expect(t.title).toBe('Daily Goal Achieved');
-      expect(t.body).toBe("You've reached 10,000 step goal and kept your 14-day streak going 🥳");
+      expect(t.title).toBe('Daily Goal Achieved 🎉');
+      expect(t.body).toBe('You’ve reached your 10,000-step goal and kept your 14-day streak going.');
       expect(t.imageUrl).toBe('https://cdn.sabisweat.app/flame-celebrate.png');
       expect(t.data.screen).toBe('HomeTab');
     });

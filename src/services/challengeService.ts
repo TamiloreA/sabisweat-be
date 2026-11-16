@@ -11,13 +11,19 @@ import type {
   ChallengeResponse,
   ChallengeProgress,
   ChallengeGoalType,
+  ChallengeHost,
   LeaderboardEntry,
   LeaderboardResponse,
   CreateChallengeInput,
   PaginatedChallengesResponse,
+  WinnerInfo,
+  QualifiedParticipant,
+  QualifiedParticipantsResponse,
 } from '../models/challengeModel';
 import type { CompletedChallengeDetail } from '../models/achievementModel';
 import { handleChallengeCreatedEvent } from './notificationEventService';
+import { getGeoPriority } from '../utils/geoHierarchy';
+import { recordPointsTransaction } from './pointsService';
 
 const CHALLENGES_TABLE = 'challenges';
 const PARTICIPANTS_TABLE = 'challenge_participants';
@@ -382,9 +388,11 @@ export async function computeProgress(
 function mapChallengeRow(
   row: ChallengeRow,
   participantsCount: number,
-  participantInfo?: { joined: boolean; joinedAt?: string; claimedAt?: string | null },
+  participantInfo?: { joined: boolean; joinedAt?: string; claimedAt?: string | null; notifyAnnouncement?: boolean },
   progress?: ComputeProgressResult | ChallengeProgress,
-  clubInfo?: ClubHostInfo
+  clubInfo?: ClubHostInfo,
+  coHostClubInfo?: ClubHostInfo,
+  winnerProfile?: ProfileRow | null
 ): ChallengeResponse {
   const joined = participantInfo?.joined ?? false;
 
@@ -406,10 +414,59 @@ function mapChallengeRow(
   // Can claim: eligible and hasn't claimed yet
   const canClaim = eligible && !participantInfo?.claimedAt;
 
-  const hostName = clubInfo?.name ?? row.host_name;
+  const hostName = clubInfo?.name ?? row.host_name ?? (row.is_official ? 'Sabi Sweat' : undefined);
   const hostLogoUrl = clubInfo?.profile_image_url ?? row.host_logo_url;
   const hostClubId = clubInfo?.id ?? row.host_club_id;
-  const hostTheme = clubInfo?.theme || undefined;
+  const hostTheme = clubInfo?.theme || (row.is_official ? 'green' : undefined);
+
+  const host: ChallengeHost | undefined = (hostName || hostClubId)
+    ? {
+        name: hostName ?? '',
+        logoUrl: hostLogoUrl ?? undefined,
+        clubId: hostClubId ?? undefined,
+        theme: hostTheme,
+      }
+    : undefined;
+
+  const coHosts: ChallengeHost[] = coHostClubInfo
+    ? [
+        {
+          name: coHostClubInfo.name,
+          logoUrl: coHostClubInfo.profile_image_url ?? undefined,
+          clubId: coHostClubInfo.id,
+          theme: coHostClubInfo.theme || undefined,
+        },
+      ]
+    : [];
+
+  const now = new Date();
+  const start = new Date(row.start_at);
+  const end = new Date(row.end_at);
+  const announcementTime = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+
+  let status: 'upcoming' | 'active' | 'verifying' | 'completed' = 'active';
+  if (now < start) {
+    status = 'upcoming';
+  } else if (now < end) {
+    status = 'active';
+  } else if (now < announcementTime) {
+    status = 'verifying';
+  } else {
+    status = 'completed';
+  }
+
+  let winner: WinnerInfo | null = null;
+  if (status === 'completed' && row.winner_user_id) {
+    const userObj = winnerProfile ? mapProfileToUser(winnerProfile, row.winner_user_id) : { id: row.winner_user_id };
+    winner = {
+      id: row.winner_user_id,
+      username: userObj.username,
+      displayName: userObj.displayName,
+      photoUrl: userObj.photoUrl,
+      avatarId: userObj.avatarId,
+      announcedAt: row.winner_announced_at || row.winner_selected_at || announcementTime.toISOString(),
+    };
+  }
 
   return {
     id: row.id,
@@ -422,14 +479,17 @@ function mapChallengeRow(
     challengeImage: row.challenge_image ?? undefined,
     rules: row.rules ?? undefined,
     goals: row.goals ?? undefined,
-    host: (hostName || hostClubId)
-      ? {
-          name: hostName ?? '',
-          logoUrl: hostLogoUrl ?? undefined,
-          clubId: hostClubId ?? undefined,
-          theme: hostTheme,
-        }
-      : undefined,
+    host,
+    coHosts,
+    isOfficial: Boolean(row.is_official),
+    hasPrizeDraw: Boolean(row.has_prize_draw),
+    prizeAmount: row.prize_amount != null ? Number(row.prize_amount) : undefined,
+    prizeCurrency: row.prize_currency || 'NGN',
+    status,
+    announcementAt: announcementTime.toISOString(),
+    serverTime: now.toISOString(),
+    winner,
+    subscribedAnnouncement: Boolean(participantInfo?.notifyAnnouncement),
     sponsorText: row.sponsor_text ?? undefined,
     cityTag: row.city_tag ?? undefined,
     country: row.country ?? undefined,
@@ -466,11 +526,26 @@ export async function getActiveChallenges(
   const pageSize = Math.max(1, size);
 
   // 1. Get user's active participations
-  const { data: participations, error: pError } = await supabase
+  let participations: any[] | null = null;
+  let pError: any = null;
+  const initialFetch = await supabase
     .from(PARTICIPANTS_TABLE)
-    .select('challenge_id, joined_at, claimed_at')
+    .select('challenge_id, joined_at, claimed_at, notify_announcement')
     .eq('user_id', userId)
     .is('left_at', null);
+
+  if (initialFetch.error && initialFetch.error.message?.includes('notify_announcement')) {
+    const fallbackFetch = await supabase
+      .from(PARTICIPANTS_TABLE)
+      .select('challenge_id, joined_at, claimed_at')
+      .eq('user_id', userId)
+      .is('left_at', null);
+    participations = fallbackFetch.data;
+    pError = fallbackFetch.error;
+  } else {
+    participations = initialFetch.data;
+    pError = initialFetch.error;
+  }
 
   if (pError) throw pError;
   if (!participations || participations.length === 0) {
@@ -499,8 +574,9 @@ export async function getActiveChallenges(
   // Build a map of participations for quick lookup
   const partMap = new Map(participations.map((p) => [p.challenge_id, p]));
 
-  // Resolve clubs for challenges with host_club_id
-  const clubsMap = await fetchClubsMap(pageChallenges.map((c) => c.host_club_id));
+  // Resolve clubs for challenges with host_club_id and co_host_club_id
+  const allClubIds = pageChallenges.flatMap((c) => [c.host_club_id, c.co_host_club_id]);
+  const clubsMap = await fetchClubsMap(allClubIds);
 
   // 3. Get participants count for each page challenge
   const countPromises = pageChallenges.map((c) => getParticipantsCount(c.id));
@@ -523,10 +599,19 @@ export async function getActiveChallenges(
         joined: true,
         joinedAt: part?.joined_at,
         claimedAt: part?.claimed_at ?? null,
+        notifyAnnouncement: part?.notify_announcement,
       },
       progressResults[i],
-      clubsMap.get(c.host_club_id)
+      clubsMap.get(c.host_club_id),
+      c.co_host_club_id ? clubsMap.get(c.co_host_club_id) : undefined
     );
+  });
+
+  // Sort: official first, then by start_at descending (already ordered)
+  data.sort((a, b) => {
+    if (a.isOfficial && !b.isOfficial) return -1;
+    if (!a.isOfficial && b.isOfficial) return 1;
+    return 0;
   });
 
   return {
@@ -540,7 +625,8 @@ export async function getActiveChallenges(
 
 /**
  * GET /challenges/available
- * Returns challenges the user has NOT joined (paginated), optionally filtered by country/region.
+ * Returns challenges the user has NOT joined (paginated), with geographic relevance ranking.
+ * Official Sabi Sweat challenges are always prioritised first.
  */
 export async function getAvailableChallenges(
   userId: string,
@@ -559,42 +645,60 @@ export async function getAvailableChallenges(
   if (pError) throw pError;
   const joinedIds = new Set((participations ?? []).map((p) => p.challenge_id));
 
-  // 2. Get all challenges that haven't ended
-  let query = supabase
+  // 2. Get all challenges that haven't ended (no hard country filter — we rank instead)
+  const { data: challenges, error: cError } = await supabase
     .from(CHALLENGES_TABLE)
     .select('*')
     .gte('end_at', new Date().toISOString())
     .order('start_at', { ascending: false });
 
-  if (filters?.country) {
-    query = query.eq('country', filters.country);
-  }
-  if (filters?.region) {
-    query = query.eq('region', filters.region);
-  }
-
-  const { data: challenges, error: cError } = await query;
   if (cError) throw cError;
   if (!challenges || challenges.length === 0) {
     return { page: currentPage, size: pageSize, total: 0, hasMore: false, data: [] };
   }
 
-  // 3. Filter out joined challenges
+  // 3. Filter out joined challenges, then sort by geographic relevance
   const available = challenges.filter((c) => !joinedIds.has(c.id));
+
+  // Apply geographic priority ranking
+  available.sort((a, b) => {
+    const aPriority = getGeoPriority(filters?.country, filters?.region, {
+      isOfficial: a.is_official,
+      country: a.country,
+      region: a.region,
+    });
+    const bPriority = getGeoPriority(filters?.country, filters?.region, {
+      isOfficial: b.is_official,
+      country: b.country,
+      region: b.region,
+    });
+    if (aPriority !== bPriority) return aPriority - bPriority;
+    // Same tier: sort by start_at descending
+    return new Date(b.start_at).getTime() - new Date(a.start_at).getTime();
+  });
+
   const total = available.length;
   const start = (currentPage - 1) * pageSize;
   const pageChallenges = available.slice(start, start + pageSize);
   const hasMore = currentPage * pageSize < total;
 
-  // Resolve clubs for available challenges on this page
-  const clubsMap = await fetchClubsMap(pageChallenges.map((c) => c.host_club_id));
+  // Resolve clubs for available challenges on this page (host + co-host)
+  const allClubIds = pageChallenges.flatMap((c) => [c.host_club_id, c.co_host_club_id]);
+  const clubsMap = await fetchClubsMap(allClubIds);
 
   // 4. Get participant counts for page challenges
   const countPromises = pageChallenges.map((c) => getParticipantsCount(c.id));
   const counts = await Promise.all(countPromises);
 
   const data = pageChallenges.map((c, i) =>
-    mapChallengeRow(c as ChallengeRow, counts[i], { joined: false }, undefined, clubsMap.get(c.host_club_id))
+    mapChallengeRow(
+      c as ChallengeRow,
+      counts[i],
+      { joined: false },
+      undefined,
+      clubsMap.get(c.host_club_id),
+      c.co_host_club_id ? clubsMap.get(c.co_host_club_id) : undefined
+    )
   );
 
   return {
@@ -661,8 +765,9 @@ export async function getPastChallenges(
     }
   }
 
-  // 3. Resolve clubs for host_club_id
-  const clubsMap = await fetchClubsMap(pageChallenges.map((c) => c.host_club_id));
+  // 3. Resolve clubs for host_club_id and co_host_club_id
+  const allClubIds = pageChallenges.flatMap((c) => [c.host_club_id, c.co_host_club_id]);
+  const clubsMap = await fetchClubsMap(allClubIds);
 
   // 4. Get participant counts
   const countPromises = pageChallenges.map((c) => getParticipantsCount(c.id));
@@ -685,7 +790,8 @@ export async function getPastChallenges(
       counts[i],
       part ?? { joined: false },
       progressResults[i],
-      clubsMap.get(c.host_club_id)
+      clubsMap.get(c.host_club_id),
+      c.co_host_club_id ? clubsMap.get(c.co_host_club_id) : undefined
     );
   });
 
@@ -827,24 +933,32 @@ export async function getChallengeById(
 
   // Resolve host details from club if host_club_id is present
   let clubInfo: ClubHostInfo | undefined;
-  if (challenge.host_club_id) {
-    const { data: club } = await supabase
-      .from(CLUBS_TABLE)
-      .select('id, name, profile_image_url, theme')
-      .eq('id', challenge.host_club_id)
-      .maybeSingle();
-    if (club) {
-      clubInfo = club as ClubHostInfo;
-    }
+  let coHostClubInfo: ClubHostInfo | undefined;
+  const clubIdsToFetch = [challenge.host_club_id, challenge.co_host_club_id].filter(Boolean);
+  if (clubIdsToFetch.length > 0) {
+    const clubsMap = await fetchClubsMap(clubIdsToFetch);
+    if (challenge.host_club_id) clubInfo = clubsMap.get(challenge.host_club_id);
+    if (challenge.co_host_club_id) coHostClubInfo = clubsMap.get(challenge.co_host_club_id);
   }
 
-  // 2. Check participation
-  const { data: participant, error: pError } = await supabase
+  // 2. Check participation (include notify_announcement)
+  let participantRes = await supabase
     .from(PARTICIPANTS_TABLE)
-    .select('joined_at, claimed_at, left_at')
+    .select('joined_at, claimed_at, left_at, notify_announcement')
     .eq('challenge_id', challengeId)
     .eq('user_id', userId)
     .maybeSingle();
+
+  if (participantRes.error && participantRes.error.message?.includes('notify_announcement')) {
+    participantRes = await supabase
+      .from(PARTICIPANTS_TABLE)
+      .select('joined_at, claimed_at, left_at')
+      .eq('challenge_id', challengeId)
+      .eq('user_id', userId)
+      .maybeSingle();
+  }
+
+  const { data: participant, error: pError } = participantRes;
 
   if (pError) throw pError;
 
@@ -859,6 +973,13 @@ export async function getChallengeById(
     progress = await computeProgress(userId, challenge as ChallengeRow, participant.joined_at);
   }
 
+  // 5. Resolve winner profile if winner exists
+  let winnerProfile: ProfileRow | undefined;
+  if (challenge.winner_user_id) {
+    const profilesMap = await fetchProfilesMap([challenge.winner_user_id]);
+    winnerProfile = profilesMap.get(challenge.winner_user_id);
+  }
+
   return mapChallengeRow(
     challenge as ChallengeRow,
     participantsCount,
@@ -866,9 +987,12 @@ export async function getChallengeById(
       joined,
       joinedAt: participant?.joined_at,
       claimedAt: participant?.claimed_at ?? null,
+      notifyAnnouncement: participant?.notify_announcement,
     },
     progress,
-    clubInfo
+    clubInfo,
+    coHostClubInfo,
+    winnerProfile
   );
 }
 
@@ -1145,6 +1269,30 @@ export async function claimReward(
 
   if (uError) throw uError;
 
+  // 5. Disburse SabiCoins if reward has a numeric points value
+  const rewardText = challenge.reward_text || '';
+  const pointsMatch = rewardText.match(/(\d[\d,]*)\s*(?:sabi\s*coins?|points?|sc)/i);
+  if (pointsMatch) {
+    const pointsAmount = parseInt(pointsMatch[1].replace(/,/g, ''), 10);
+    if (pointsAmount > 0) {
+      try {
+        await recordPointsTransaction(
+          userId,
+          pointsAmount,
+          'challenge_reward',
+          `Reward for completing challenge: ${challenge.title}`,
+          `challenge_claim:${challengeId}:${userId}`,
+          { challengeId, challengeTitle: challenge.title }
+        );
+      } catch (err: any) {
+        // already_processed is fine (idempotent), otherwise log and continue
+        if (err?.message !== 'already_processed' && !(typeof err === 'object' && err?.reason === 'already_processed')) {
+          console.warn('[challengeService] Failed to disburse SabiCoins for challenge claim:', err);
+        }
+      }
+    }
+  }
+
   return { ok: true };
 }
 
@@ -1288,6 +1436,11 @@ export async function createChallenge(
     host_name: hostName ?? null,
     host_logo_url: hostLogoUrl ?? null,
     host_club_id: hostClubId,
+    co_host_club_id: input.coHostClubId ?? null,
+    is_official: Boolean(input.isOfficial),
+    has_prize_draw: Boolean(input.hasPrizeDraw),
+    prize_amount: input.prizeAmount ?? 0,
+    prize_currency: input.prizeCurrency ?? 'NGN',
     start_at: startAt.toISOString(),
     end_at: endAt.toISOString(),
     who_can_join: input.whoCanJoin ?? 'everyone',
@@ -1334,7 +1487,18 @@ export async function createChallenge(
     });
   }
 
-  return mapChallengeRow(created as ChallengeRow, 0, { joined: false }, undefined, clubInfo);
+  // Resolve co-host club info
+  let coHostClubInfo: ClubHostInfo | undefined;
+  if (input.coHostClubId) {
+    const { data: coClub } = await supabase
+      .from(CLUBS_TABLE)
+      .select('id, name, profile_image_url, theme')
+      .eq('id', input.coHostClubId)
+      .maybeSingle();
+    if (coClub) coHostClubInfo = coClub as ClubHostInfo;
+  }
+
+  return mapChallengeRow(created as ChallengeRow, 0, { joined: false }, undefined, clubInfo, coHostClubInfo);
 }
 
 /**
@@ -1406,4 +1570,184 @@ export async function getCompletedChallenges(userId: string): Promise<CompletedC
   }
 
   return completedList;
+}
+
+
+// ─── Qualified Participants & Announcement Subscription ──────────
+
+/**
+ * GET /challenges/:id/qualified-participants
+ * Returns participants who have met the challenge goal.
+ */
+export async function getQualifiedParticipants(
+  challengeId: string,
+  page: number = 1,
+  size: number = 20
+): Promise<QualifiedParticipantsResponse> {
+  const currentPage = Math.max(1, page);
+  const pageSize = Math.max(1, Math.min(100, size));
+
+  // 1. Get challenge
+  const { data: challenge, error: cError } = await supabase
+    .from(CHALLENGES_TABLE)
+    .select('*')
+    .eq('id', challengeId)
+    .single();
+
+  if (cError || !challenge) {
+    throw { status: 404, message: 'Challenge not found' };
+  }
+
+  const now = new Date();
+  const start = new Date(challenge.start_at);
+  const end = new Date(challenge.end_at);
+  const announcementTime = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+
+  let status: 'upcoming' | 'active' | 'verifying' | 'completed' = 'active';
+  if (now < start) status = 'upcoming';
+  else if (now < end) status = 'active';
+  else if (now < announcementTime) status = 'verifying';
+  else status = 'completed';
+
+  const goalType = normalizeGoalType(challenge.goal_type, challenge.title, challenge.subtitle);
+
+  // 2. Get all active participants
+  const { data: participants, error: partError } = await supabase
+    .from(PARTICIPANTS_TABLE)
+    .select('user_id, joined_at')
+    .eq('challenge_id', challengeId)
+    .is('left_at', null);
+
+  if (partError) throw partError;
+  if (!participants || participants.length === 0) {
+    return {
+      challengeId,
+      status,
+      announcementAt: announcementTime.toISOString(),
+      serverTime: now.toISOString(),
+      winner: null,
+      totalQualified: 0,
+      page: currentPage,
+      size: pageSize,
+      data: [],
+    };
+  }
+
+  // 3. Compute progress for each participant to determine qualification
+  const progressPromises = participants.map((p) =>
+    computeProgress(p.user_id, challenge as ChallengeRow, p.joined_at)
+  );
+  const progressResults = await Promise.all(progressPromises);
+
+  // Filter to qualified participants (100% completion)
+  const qualified: Array<{ userId: string; joinedAt: string; progress: ComputeProgressResult }> = [];
+  for (let i = 0; i < participants.length; i++) {
+    if (progressResults[i].percent >= 100) {
+      qualified.push({
+        userId: participants[i].user_id,
+        joinedAt: participants[i].joined_at,
+        progress: progressResults[i],
+      });
+    }
+  }
+
+  // Sort by steps descending for consistent ordering
+  qualified.sort((a, b) => b.progress.steps - a.progress.steps);
+
+  const totalQualified = qualified.length;
+  const startIdx = (currentPage - 1) * pageSize;
+  const pageItems = qualified.slice(startIdx, startIdx + pageSize);
+
+  // 4. Resolve profiles
+  const profileIds = pageItems.map((q) => q.userId);
+  if (challenge.winner_user_id) profileIds.push(challenge.winner_user_id);
+  const profilesMap = await fetchProfilesMap(profileIds);
+
+  // 5. Build winner info
+  let winner: WinnerInfo | null = null;
+  if (status === 'completed' && challenge.winner_user_id) {
+    const wp = profilesMap.get(challenge.winner_user_id);
+    const userObj = mapProfileToUser(wp, challenge.winner_user_id);
+    winner = {
+      id: challenge.winner_user_id,
+      username: userObj.username,
+      displayName: userObj.displayName,
+      photoUrl: userObj.photoUrl,
+      avatarId: userObj.avatarId,
+      announcedAt: challenge.winner_announced_at || challenge.winner_selected_at || announcementTime.toISOString(),
+    };
+  }
+
+  // 6. Build metric description
+  let metricLabel = 'steps';
+  if (goalType === 'daily_step') {
+    const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)));
+    metricLabel = `${totalDays}/${totalDays} days`;
+  } else if (goalType === 'steps_goal') {
+    metricLabel = `${challenge.goal_value?.toLocaleString()} steps`;
+  } else if (goalType === 'most_steps') {
+    metricLabel = 'most steps';
+  }
+
+  const data: QualifiedParticipant[] = pageItems.map((q) => {
+    const profile = profilesMap.get(q.userId);
+    const userObj = mapProfileToUser(profile, q.userId);
+    return {
+      id: q.userId,
+      username: userObj.username,
+      displayName: userObj.displayName,
+      photoUrl: userObj.photoUrl,
+      avatarId: userObj.avatarId,
+      metric: metricLabel,
+      qualifiedAt: q.joinedAt,
+      isWinner: q.userId === challenge.winner_user_id,
+    };
+  });
+
+  return {
+    challengeId,
+    status,
+    announcementAt: announcementTime.toISOString(),
+    serverTime: now.toISOString(),
+    winner,
+    totalQualified,
+    page: currentPage,
+    size: pageSize,
+    data,
+  };
+}
+
+/**
+ * POST /challenges/:id/subscribe-announcement
+ * Subscribe or unsubscribe from winner announcement push notification.
+ */
+export async function subscribeAnnouncement(
+  challengeId: string,
+  userId: string,
+  notify: boolean
+): Promise<{ subscribed: boolean }> {
+  // Verify participant exists and is active
+  const { data: participant, error: pError } = await supabase
+    .from(PARTICIPANTS_TABLE)
+    .select('id, left_at')
+    .eq('challenge_id', challengeId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (pError) throw pError;
+  if (!participant) {
+    throw { status: 400, message: 'You have not joined this challenge' };
+  }
+  if (participant.left_at) {
+    throw { status: 400, message: 'You have left this challenge' };
+  }
+
+  const { error: uError } = await supabase
+    .from(PARTICIPANTS_TABLE)
+    .update({ notify_announcement: notify })
+    .eq('id', participant.id);
+
+  if (uError) throw uError;
+
+  return { subscribed: notify };
 }

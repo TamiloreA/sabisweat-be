@@ -17,6 +17,8 @@ import {
   getLeaderboard,
   claimReward,
   getCompletedChallenges,
+  getQualifiedParticipants,
+  subscribeAnnouncement,
 } from '../controllers/challengeController';
 import { requireAuth } from '../middleware/auth';
 
@@ -520,5 +522,74 @@ router.get('/:id/leaderboard', requireAuth, getLeaderboard);
  *         description: Missing or invalid token
  */
 router.post('/:id/claim', requireAuth, claimReward);
+
+/**
+ * @openapi
+ * /challenges/{id}/qualified-participants:
+ *   get:
+ *     summary: Get qualified participants for a challenge (paginated)
+ *     description: Returns participants who achieved 100% of the challenge goal. When completed, includes winner details and flags the winner.
+ *     tags: [Challenges]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: size
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: Qualified participants and winner data
+ *       404:
+ *         description: Challenge not found
+ *       401:
+ *         description: Missing or invalid token
+ */
+router.get('/:id/qualified-participants', requireAuth, getQualifiedParticipants);
+
+/**
+ * @openapi
+ * /challenges/{id}/subscribe-announcement:
+ *   post:
+ *     summary: Subscribe to challenge winner announcement notifications
+ *     tags: [Challenges]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [notify]
+ *             properties:
+ *               notify:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Subscription preference updated
+ *       400:
+ *         description: Invalid input or not joined
+ *       401:
+ *         description: Missing or invalid token
+ */
+router.post('/:id/subscribe-announcement', requireAuth, subscribeAnnouncement);
 
 export default router;

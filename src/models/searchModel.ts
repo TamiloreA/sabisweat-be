@@ -13,6 +13,7 @@ export interface SearchQueryParams {
   offset: number;
   country?: string;
   region?: string;
+  excludeClubId?: string;
 }
 
 export interface SearchChallengeItem {
@@ -26,6 +27,7 @@ export interface SearchChallengeItem {
   endDate: string;
   participantCount: number;
   status: string;
+  isOfficial?: boolean;
 }
 
 export interface SearchClubItem {
@@ -38,6 +40,7 @@ export interface SearchClubItem {
   memberCount: number;
   clubTheme: string;
   status: string;
+  isOfficial?: boolean;
 }
 
 export interface SearchHelpItem {

@@ -157,7 +157,7 @@ describe('Notification Event Handlers', () => {
         expect.objectContaining({
           userId: 'user-1',
           type: 'DAILY_STEP_REMINDER',
-          title: "You're halfway to your goal",
+          title: 'Halfway to your goal 💪',
           idempotencyKey: 'step_milestone_50:user-1:2026-11-09',
         })
       );
@@ -171,7 +171,7 @@ describe('Notification Event Handlers', () => {
         expect.objectContaining({
           userId: 'user-1',
           type: 'DAILY_STEP_REMINDER',
-          title: "You're nearly there",
+          title: 'Almost there 💪',
           idempotencyKey: 'step_milestone_80:user-1:2026-11-09',
         })
       );
@@ -187,7 +187,7 @@ describe('Notification Event Handlers', () => {
         expect.objectContaining({
           userId: 'user-1',
           type: 'STREAK_ALERT',
-          title: 'Daily Goal Achieved',
+          title: 'Daily Goal Achieved 🎉',
           idempotencyKey: 'step_goal_100:user-1:2026-11-09',
         })
       );

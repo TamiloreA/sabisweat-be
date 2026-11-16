@@ -80,6 +80,15 @@ export interface WeeklyReportHighlights {
   dailyAverageSteps: number;
 }
 
+export interface WeeklyReportBadge {
+  id: string;
+  name: string;
+  description?: string;
+  earnedAt: string;
+  category?: string;
+  badgeIconUrl?: string;
+}
+
 export interface WeeklyReportData {
   reportingPeriod: WeeklyReportReportingPeriod;
   summary: WeeklyReportSummary;
@@ -87,6 +96,7 @@ export interface WeeklyReportData {
   communityRank: WeeklyReportCommunityRank;
   dailyBreakdown: WeeklyReportDailyBreakdown[];
   highlights: WeeklyReportHighlights;
+  badgesEarned: WeeklyReportBadge[];
 }
 
 export interface WeeklyReportResponse {

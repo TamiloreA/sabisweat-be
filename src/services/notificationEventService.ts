@@ -1456,3 +1456,172 @@ export async function handlePostCommentEvent(commentId: string): Promise<void> {
     idempotencyKey,
   });
 }
+
+
+// ─── Challenge Winner Selection & Announcement Push Events ─────────
+
+/**
+ * Executes winner selection for challenges with prize draws that have completed.
+ * Selects winner among 100% qualified participants, atomically locks in DB,
+ * and sends push notifications to winner ("You won! 🏆") and subscribers ("Winners Announced 🎉").
+ */
+export async function handleChallengeWinnerSelectionEvent(
+  challengeId: string
+): Promise<{ winnerId: string | null; notifiedSubscribersCount: number }> {
+  // 1. Fetch challenge
+  const { data: challenge, error: cErr } = await supabase
+    .from(TABLE_CHALLENGES)
+    .select('*')
+    .eq('id', challengeId)
+    .single();
+
+  if (cErr || !challenge) return { winnerId: null, notifiedSubscribersCount: 0 };
+  if (!challenge.has_prize_draw) return { winnerId: null, notifiedSubscribersCount: 0 };
+  if (challenge.winner_user_id) return { winnerId: challenge.winner_user_id, notifiedSubscribersCount: 0 };
+
+  const now = new Date();
+  const end = new Date(challenge.end_at);
+  const announcementTime = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+
+  // Allow winner selection once end time has passed (or countdown completed)
+  if (now < end) {
+    return { winnerId: null, notifiedSubscribersCount: 0 };
+  }
+
+  // 2. Fetch active participants
+  const { data: participants, error: pErr } = await supabase
+    .from(TABLE_PARTICIPANTS)
+    .select('user_id, joined_at')
+    .eq('challenge_id', challengeId)
+    .is('left_at', null);
+
+  if (pErr || !participants || participants.length === 0) {
+    return { winnerId: null, notifiedSubscribersCount: 0 };
+  }
+
+  // 3. Compute qualifications
+  const startDate = new Date(challenge.start_at).toISOString().split('T')[0];
+  const endDate = new Date(challenge.end_at).toISOString().split('T')[0];
+  const goalType = challenge.goal_type || 'steps';
+  const goalValue = challenge.goal_value || 1;
+
+  const qualified: Array<{ userId: string; steps: number; joinedAt: string }> = [];
+
+  for (const p of participants) {
+    const { data: stepRows } = await supabase
+      .from(TABLE_DAILY_STEPS)
+      .select('steps')
+      .eq('user_id', p.user_id)
+      .gte('date', startDate)
+      .lte('date', endDate);
+
+    const rows = stepRows || [];
+    const totalSteps = rows.reduce((sum, r) => sum + (r.steps || 0), 0);
+
+    let isQualified = false;
+    if (goalType === 'daily_step') {
+      const daysCompleted = rows.filter((r) => (r.steps || 0) >= goalValue).length;
+      const totalDays = Math.max(
+        1,
+        Math.round((end.getTime() - new Date(challenge.start_at).getTime()) / (1000 * 60 * 60 * 24))
+      );
+      isQualified = daysCompleted >= totalDays;
+    } else if (goalType === 'steps_goal') {
+      isQualified = totalSteps >= goalValue;
+    } else {
+      // most_steps: any verified steps
+      isQualified = totalSteps > 0;
+    }
+
+    if (isQualified) {
+      qualified.push({ userId: p.user_id, steps: totalSteps, joinedAt: p.joined_at });
+    }
+  }
+
+  if (qualified.length === 0) {
+    return { winnerId: null, notifiedSubscribersCount: 0 };
+  }
+
+  // 4. Select winner
+  let winnerId: string;
+  if (goalType === 'most_steps') {
+    // Sort descending by steps, tie-breaker: earlier joinedAt
+    qualified.sort((a, b) => {
+      if (b.steps !== a.steps) return b.steps - a.steps;
+      return new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime();
+    });
+    winnerId = qualified[0].userId;
+  } else {
+    // Random draw among 100% qualified participants
+    const randomIndex = Math.floor(Math.random() * qualified.length);
+    winnerId = qualified[randomIndex].userId;
+  }
+
+  // 5. Atomically lock winner in database
+  const nowIso = new Date().toISOString();
+  const { data: updated, error: updateErr } = await supabase
+    .from(TABLE_CHALLENGES)
+    .update({
+      winner_user_id: winnerId,
+      winner_selected_at: nowIso,
+      winner_announced_at: nowIso,
+    })
+    .eq('id', challengeId)
+    .is('winner_user_id', null)
+    .select('id, winner_user_id')
+    .maybeSingle();
+
+  if (updateErr || !updated) {
+    // Already picked by concurrent worker
+    return { winnerId: challenge.winner_user_id || winnerId, notifiedSubscribersCount: 0 };
+  }
+
+  const challengeImage = resolveChallengeNotificationImage(challenge);
+
+  // 6. Push notification to the winner
+  const winnerPayload = notificationTemplates.challengeWinnerAnnouncement(
+    challengeId,
+    challenge.title,
+    challengeImage
+  );
+  await dispatchNotification({
+    userId: winnerId,
+    type: winnerPayload.category,
+    title: winnerPayload.title,
+    body: winnerPayload.body,
+    imageUrl: winnerPayload.imageUrl,
+    data: winnerPayload.data,
+    idempotencyKey: `challenge_winner:${challengeId}:${winnerId}`,
+  });
+
+  // 7. Push notification to subscribers
+  const { data: subscribers } = await supabase
+    .from(TABLE_PARTICIPANTS)
+    .select('user_id')
+    .eq('challenge_id', challengeId)
+    .eq('notify_announcement', true)
+    .is('left_at', null)
+    .neq('user_id', winnerId);
+
+  let notifiedCount = 0;
+  const subscriberPayload = notificationTemplates.challengeSubscribersAnnouncement(
+    challengeId,
+    challenge.title,
+    challengeImage
+  );
+
+  for (const sub of subscribers ?? []) {
+    await dispatchNotification({
+      userId: sub.user_id,
+      type: subscriberPayload.category,
+      title: subscriberPayload.title,
+      body: subscriberPayload.body,
+      imageUrl: subscriberPayload.imageUrl,
+      data: subscriberPayload.data,
+      idempotencyKey: `challenge_announced:${challengeId}:${sub.user_id}`,
+    });
+    notifiedCount++;
+  }
+
+  return { winnerId, notifiedSubscribersCount: notifiedCount };
+}

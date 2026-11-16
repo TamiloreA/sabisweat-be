@@ -479,6 +479,38 @@ export const getWeeklyReport = async (
     topPercentage = Math.min(100, Math.max(1, Math.round(100 - outperformedPercentile)));
   }
 
+  // Fetch badges earned during reporting week
+  let badgesEarned: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    earnedAt: string;
+    category?: string;
+    badgeIconUrl?: string;
+  }> = [];
+
+  try {
+    const { data: achievements } = await supabase
+      .from('user_achievements')
+      .select('id, category, badge_key, earned_at, metadata')
+      .eq('user_id', userId)
+      .gte('earned_at', `${resolvedWeekStartDate}T00:00:00.000Z`)
+      .lte('earned_at', `${weekEndDate}T23:59:59.999Z`);
+
+    if (achievements) {
+      badgesEarned = achievements.map((a: any) => ({
+        id: a.id,
+        name: a.metadata?.title || a.badge_key,
+        description: a.metadata?.description || undefined,
+        earnedAt: a.earned_at,
+        category: a.category,
+        badgeIconUrl: a.metadata?.badgeIconUrl || undefined,
+      }));
+    }
+  } catch (err) {
+    console.warn('[healthService] Error querying weekly badges earned:', err);
+  }
+
   return {
     reportingPeriod: {
       weekStartDate: resolvedWeekStartDate,
@@ -512,6 +544,7 @@ export const getWeeklyReport = async (
       bestDay,
       dailyAverageSteps,
     },
+    badgesEarned,
   };
 };
 

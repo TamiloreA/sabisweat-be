@@ -19,6 +19,7 @@ import achievementRoutes from './routes/achievementRoutes';
 import emailNotificationRoutes from './routes/emailNotificationRoutes';
 import notificationRoutes from './routes/notificationRoutes';
 import adminPushRoutes from './routes/adminPushRoutes';
+import adminChallengeRoutes from './routes/adminChallengeRoutes';
 import searchRoutes from './routes/searchRoutes';
 import supportRoutes from './routes/supportRoutes';
 import userRoutes from './routes/userRoutes';
@@ -132,6 +133,11 @@ app.use('/api/v1/partners', partnerRoutes);
 app.use('/partner-portal', partnerPortalRoutes);
 app.use('/v1/partner-portal', partnerPortalRoutes);
 app.use('/api/v1/partner-portal', partnerPortalRoutes);
+
+// Admin Challenges — mounted at root /admin/challenges, /v1, and /api/v1
+app.use('/admin/challenges', adminChallengeRoutes);
+app.use('/v1/admin/challenges', adminChallengeRoutes);
+app.use('/api/v1/admin/challenges', adminChallengeRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'SabiSweat API is running' });

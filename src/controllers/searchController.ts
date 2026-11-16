@@ -80,9 +80,10 @@ export async function search(req: Request, res: Response): Promise<void> {
       }
     }
 
-    // 4. Parse optional location parameters
+    // 4. Parse optional location & exclusion parameters
     const country = typeof req.query.country === 'string' ? req.query.country.trim() : undefined;
     const region = typeof req.query.region === 'string' ? req.query.region.trim() : undefined;
+    const excludeClubId = typeof req.query.excludeClubId === 'string' ? req.query.excludeClubId.trim() : undefined;
 
     // 5. Execute search
     const searchResponse = await performSearch({
@@ -92,6 +93,7 @@ export async function search(req: Request, res: Response): Promise<void> {
       offset,
       country,
       region,
+      excludeClubId,
     });
 
     res.status(200).json(searchResponse);

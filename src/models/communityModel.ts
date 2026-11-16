@@ -146,6 +146,7 @@ export interface ClubDetail {
   coverImageUrl: string;
   profileImageUrl: string;
   theme: string;
+  isOfficial?: boolean;
   status: string;
   membersCount: number;
   joinStatus: 'joined' | 'pending' | 'none';
@@ -214,6 +215,7 @@ export interface CreateClubInput {
   profileImageUrl?: string;
   profileImageBase64?: string;
   isPrivate?: boolean;
+  isOfficial?: boolean;
   theme?: string;
 }
 

@@ -581,8 +581,8 @@ describe('User Avatar & Streak Storage Image Resolver', () => {
       );
 
       expect(template.category).toBe(PUSH_CATEGORIES.STREAK_ALERT);
-      expect(template.title).toBe('Daily Goal Achieved');
-      expect(template.body).toBe("You've reached 10,000 step goal and kept your 14-day streak going 🥳");
+      expect(template.title).toBe('Daily Goal Achieved 🎉');
+      expect(template.body).toBe('You’ve reached your 10,000-step goal and kept your 14-day streak going.');
       expect(template.imageUrl).toBe('https://auth.sabisweat.com/storage/v1/object/public/streaks/flame-celebration.png');
       expect(template.data.imageUrl).toBe('https://auth.sabisweat.com/storage/v1/object/public/streaks/flame-celebration.png');
       expect(template.data.screen).toBe('HomeTab');

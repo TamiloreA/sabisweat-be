@@ -35,6 +35,7 @@ import {
   handlePostLikeEvent,
   handlePostCommentEvent,
 } from './notificationEventService';
+import { getGeoPriority } from '../utils/geoHierarchy';
 
 const POSTS_TABLE = 'posts';
 const LIKES_TABLE = 'community_likes';
@@ -1029,6 +1030,41 @@ export async function getClubs(
     return { page: currentPage, size: pageSize, total: 0, hasMore: false, data: [] };
   }
 
+  // Fetch user profile location if available for 4-tier relevance ranking
+  let userCountry: string | undefined;
+  let userRegion: string | undefined;
+  if (userId) {
+    const { data: userProfile } = await supabase
+      .from('profiles')
+      .select('country, region')
+      .eq('id', userId)
+      .maybeSingle();
+    if (userProfile) {
+      userCountry = userProfile.country || undefined;
+      userRegion = userProfile.region || undefined;
+    }
+  }
+
+  // Sort clubs: official content first (Tier 0), then exact region (Tier 1), same country (Tier 2), neighbouring (Tier 3), global (Tier 4)
+  clubs.sort((a: any, b: any) => {
+    const pA = getGeoPriority(userCountry, userRegion, {
+      isOfficial: a.is_official,
+      country: a.country_code || a.country,
+      region: Array.isArray(a.regions) ? a.regions[0] : undefined,
+      countries: a.countries,
+      locationScope: a.location_scope,
+    });
+    const pB = getGeoPriority(userCountry, userRegion, {
+      isOfficial: b.is_official,
+      country: b.country_code || b.country,
+      region: Array.isArray(b.regions) ? b.regions[0] : undefined,
+      countries: b.countries,
+      locationScope: b.location_scope,
+    });
+    if (pA !== pB) return pA - pB;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
   const total = clubs.length;
   const start = (currentPage - 1) * pageSize;
   const pageClubs = clubs.slice(start, start + pageSize);
@@ -1106,6 +1142,7 @@ export async function getClubs(
     coverImageUrl: club.cover_image_url,
     profileImageUrl: club.profile_image_url,
     theme: club.theme,
+    isOfficial: Boolean(club.is_official),
     status: club.status,
     membersCount: memberCounts.get(club.id) ?? (typeof club.members_count === 'number' ? club.members_count : 0),
     joinStatus: (userId ? (myJoinedClubs.has(club.id) ? 'joined' : (myPendingRequests.has(club.id) ? 'pending' : 'none')) : 'none') as 'joined' | 'pending' | 'none',
@@ -1184,6 +1221,7 @@ export async function getClubById(clubId: string, userId?: string): Promise<Club
     coverImageUrl: club.cover_image_url,
     profileImageUrl: club.profile_image_url,
     theme: club.theme,
+    isOfficial: Boolean(club.is_official),
     status: club.status,
     membersCount: exactCount,
     joinStatus: userId ? (isMember ? 'joined' : (isPending ? 'pending' : 'none')) : 'none',

@@ -15,18 +15,30 @@ const DAILY_STEPS_TABLE = 'daily_steps';
 const ACHIEVEMENTS_TABLE = 'user_achievements';
 
 const STEP_MILESTONES = [
-  { id: 'step_10k', title: '10k steps', threshold: 10000, displayValue: '10K' },
-  { id: 'step_50k', title: '50k steps', threshold: 50000, displayValue: '50K' },
-  { id: 'step_100k', title: '100k steps', threshold: 100000, displayValue: '100K' },
+  { id: 'step_200k', title: '200k steps', threshold: 200000, displayValue: '200K' },
   { id: 'step_250k', title: '250k steps', threshold: 250000, displayValue: '250K' },
+  { id: 'step_300k', title: '300k steps', threshold: 300000, displayValue: '300K' },
+  { id: 'step_350k', title: '350k steps', threshold: 350000, displayValue: '350K' },
+  { id: 'step_400k', title: '400k steps', threshold: 400000, displayValue: '400K' },
+  { id: 'step_450k', title: '450k steps', threshold: 450000, displayValue: '450K' },
   { id: 'step_500k', title: '500k steps', threshold: 500000, displayValue: '500K' },
+  { id: 'step_600k', title: '600k steps', threshold: 600000, displayValue: '600K' },
+  { id: 'step_700k', title: '700k steps', threshold: 700000, displayValue: '700K' },
+  { id: 'step_800k', title: '800k steps', threshold: 800000, displayValue: '800K' },
+  { id: 'step_900k', title: '900k steps', threshold: 900000, displayValue: '900K' },
   { id: 'step_1m', title: '1M steps', threshold: 1000000, displayValue: '1M' },
 ];
 
 const STREAK_MILESTONES = [
-  { id: 'streak_40', title: '40 Days Streak', threshold: 40, displayValue: '40' },
+  { id: 'streak_3', title: '3 Days Streak', threshold: 3, displayValue: '3' },
+  { id: 'streak_7', title: '7 Days Streak', threshold: 7, displayValue: '7' },
+  { id: 'streak_14', title: '14 Days Streak', threshold: 14, displayValue: '14' },
+  { id: 'streak_30', title: '30 Days Streak', threshold: 30, displayValue: '30' },
+  { id: 'streak_60', title: '60 Days Streak', threshold: 60, displayValue: '60' },
   { id: 'streak_100', title: '100 Days Streak', threshold: 100, displayValue: '100' },
+  { id: 'streak_180', title: '180 Days Streak', threshold: 180, displayValue: '180' },
   { id: 'streak_365', title: '365 Days Streak', threshold: 365, displayValue: '365' },
+  { id: 'streak_730', title: '730 Days Streak', threshold: 730, displayValue: '730' },
   { id: 'streak_1000', title: '1000 Days Streak', threshold: 1000, displayValue: '1000' },
 ];
 

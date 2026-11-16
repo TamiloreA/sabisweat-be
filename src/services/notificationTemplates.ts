@@ -76,8 +76,8 @@ export const notificationTemplates = {
     if (steps > 0) {
       return {
         category: PUSH_CATEGORIES.DAILY_STEP_REMINDER,
-        title: "You're off to a great start",
-        body: `You've already taken ${formatNumber(steps)} steps today. Keep going towards your daily goal`,
+        title: 'Off to a great start 🌟',
+        body: `You’ve taken ${formatNumber(steps)} steps today. Keep moving towards your daily goal.`,
         data: { screen: 'HomeTab' },
       };
     }
@@ -97,8 +97,8 @@ export const notificationTemplates = {
     const validImage = sanitizeImageUrl(flameImageUrl || process.env.CDN_STREAK_FLAME_ACTIVE);
     return {
       category: PUSH_CATEGORIES.DAILY_STEP_REMINDER,
-      title: "You're halfway to your goal",
-      body: `You've reached ${formatNumber(currentSteps)} steps today. Keep up the momentum and take the next step towards your target`,
+      title: 'Halfway to your goal 💪',
+      body: `You’ve reached ${formatNumber(currentSteps)} steps today. Keep up the momentum and take the next step towards your goal.`,
       imageUrl: validImage,
       data: {
         screen: 'HomeTab',
@@ -113,8 +113,8 @@ export const notificationTemplates = {
   stepMilestone80(remainingSteps: number): NotificationPayloadTemplate {
     return {
       category: PUSH_CATEGORIES.DAILY_STEP_REMINDER,
-      title: "You're nearly there",
-      body: `Just ${formatNumber(remainingSteps)} steps to reach your daily goal. You're making great progress`,
+      title: 'Almost there 💪',
+      body: `Just ${formatNumber(remainingSteps)} steps to reach your daily goal. You’re making great progress.`,
       data: { screen: 'HomeTab' },
     };
   },
@@ -126,8 +126,8 @@ export const notificationTemplates = {
     const validImage = sanitizeImageUrl(celebrationImageUrl || process.env.CDN_STREAK_FLAME_CELEBRATION);
     return {
       category: PUSH_CATEGORIES.STREAK_ALERT,
-      title: 'Daily Goal Achieved',
-      body: `You've reached ${formatNumber(goal)} step goal and kept your ${formatNumber(streakDays)}-day streak going 🥳`,
+      title: 'Daily Goal Achieved 🎉',
+      body: `You’ve reached your ${formatNumber(goal)}-step goal and kept your ${formatNumber(streakDays)}-day streak going.`,
       imageUrl: validImage,
       data: {
         screen: 'HomeTab',
@@ -419,6 +419,52 @@ export const notificationTemplates = {
     imageUrl?: string
   ): NotificationPayloadTemplate {
     return this.challengeCompletionGoalMet(challengeId, challengeTitle, undefined, imageUrl);
+  },
+
+  /**
+   * 7. Challenge Winner Announcement (Grand Prize Winner)
+   */
+  challengeWinnerAnnouncement(
+    challengeId: string,
+    challengeTitle: string,
+    imageUrl?: string
+  ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(imageUrl);
+    return {
+      category: PUSH_CATEGORIES.CHALLENGE_UPDATE,
+      title: 'You won! 🏆',
+      body: `Congratulations! You won the grand prize for ${challengeTitle}!`,
+      imageUrl: validImage,
+      data: {
+        screen: 'ChallengeOverview',
+        params: { challengeId },
+        type: 'challenge_winner',
+        ...(validImage ? { imageUrl: validImage } : {}),
+      },
+    };
+  },
+
+  /**
+   * 8. Challenge Winner Announced (Subscribers notification)
+   */
+  challengeSubscribersAnnouncement(
+    challengeId: string,
+    challengeTitle: string,
+    imageUrl?: string
+  ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(imageUrl);
+    return {
+      category: PUSH_CATEGORIES.CHALLENGE_UPDATE,
+      title: 'Winners Announced 🎉',
+      body: `The results for ${challengeTitle} are in! Tap to see the winner.`,
+      imageUrl: validImage,
+      data: {
+        screen: 'ChallengeOverview',
+        params: { challengeId },
+        type: 'challenge_winners_announced',
+        ...(validImage ? { imageUrl: validImage } : {}),
+      },
+    };
   },
 
   /**

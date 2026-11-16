@@ -28,6 +28,11 @@ export interface CreateChallengeInput {
   hostName?: string;
   hostLogoUrl?: string;
   hostClubId?: string;
+  coHostClubId?: string;
+  isOfficial?: boolean;
+  hasPrizeDraw?: boolean;
+  prizeAmount?: number;
+  prizeCurrency?: string;
   startAt: string;
   endAt: string;
   whoCanJoin?: string;
@@ -56,6 +61,14 @@ export interface ChallengeRow {
   host_name: string | null;
   host_logo_url: string | null;
   host_club_id: string | null;
+  co_host_club_id?: string | null;
+  is_official?: boolean;
+  has_prize_draw?: boolean;
+  prize_amount?: number | null;
+  prize_currency?: string | null;
+  winner_user_id?: string | null;
+  winner_selected_at?: string | null;
+  winner_announced_at?: string | null;
   start_at: string;
   end_at: string;
   who_can_join: string | null;
@@ -72,6 +85,7 @@ export interface ChallengeParticipantRow {
   joined_at: string;
   left_at: string | null;
   claimed_at: string | null;
+  notify_announcement?: boolean;
 }
 
 export interface ChallengeProgress {
@@ -96,6 +110,38 @@ export interface ChallengeHost {
   theme?: ClubTheme | string;
 }
 
+export interface WinnerInfo {
+  id: string;
+  username?: string;
+  displayName?: string;
+  photoUrl?: string;
+  avatarId?: string;
+  announcedAt?: string;
+}
+
+export interface QualifiedParticipant {
+  id: string;
+  username?: string;
+  displayName?: string;
+  photoUrl?: string;
+  avatarId?: string;
+  metric: string;
+  qualifiedAt: string;
+  isWinner?: boolean;
+}
+
+export interface QualifiedParticipantsResponse {
+  challengeId: string;
+  status: 'active' | 'upcoming' | 'verifying' | 'completed';
+  announcementAt?: string;
+  serverTime: string;
+  winner?: WinnerInfo | null;
+  totalQualified: number;
+  page: number;
+  size: number;
+  data: QualifiedParticipant[];
+}
+
 export interface ChallengeResponse {
   id: string;
   title: string;
@@ -108,6 +154,16 @@ export interface ChallengeResponse {
   rules?: string[];
   goals?: string[];
   host?: ChallengeHost;
+  coHosts?: ChallengeHost[];
+  isOfficial?: boolean;
+  hasPrizeDraw?: boolean;
+  prizeAmount?: number;
+  prizeCurrency?: string;
+  status?: 'active' | 'upcoming' | 'verifying' | 'completed';
+  announcementAt?: string;
+  serverTime?: string;
+  winner?: WinnerInfo | null;
+  subscribedAnnouncement?: boolean;
   sponsorText?: string;
   cityTag?: string;
   country?: string;

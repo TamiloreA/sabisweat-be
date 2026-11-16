@@ -161,6 +161,11 @@ export const createChallenge = async (req: Request, res: Response, next: NextFun
       hostName,
       hostLogoUrl,
       hostClubId: bodyHostClubId,
+      coHostClubId,
+      isOfficial,
+      hasPrizeDraw,
+      prizeAmount,
+      prizeCurrency,
       startAt,
       endAt,
       whoCanJoin,
@@ -205,6 +210,11 @@ export const createChallenge = async (req: Request, res: Response, next: NextFun
         hostName: typeof hostName === 'string' ? hostName.trim() : undefined,
         hostLogoUrl: typeof hostLogoUrl === 'string' ? hostLogoUrl.trim() : undefined,
         hostClubId: typeof hostClubId === 'string' ? hostClubId.trim() : undefined,
+        coHostClubId: typeof coHostClubId === 'string' ? coHostClubId.trim() : undefined,
+        isOfficial: isOfficial === true || isOfficial === 'true',
+        hasPrizeDraw: hasPrizeDraw === true || hasPrizeDraw === 'true',
+        prizeAmount: typeof prizeAmount === 'number' ? prizeAmount : (Number(prizeAmount) || undefined),
+        prizeCurrency: typeof prizeCurrency === 'string' ? prizeCurrency.trim() : undefined,
         startAt: startAt.trim(),
         endAt: endAt.trim(),
         whoCanJoin: typeof whoCanJoin === 'string' && ['everyone', 'club_members'].includes(whoCanJoin) ? whoCanJoin : undefined,
@@ -228,6 +238,45 @@ export const getCompletedChallenges = async (req: Request, res: Response, next: 
     const challenges = await challengeService.getCompletedChallenges(req.user!.id);
     res.status(200).json({ status: 'success', success: true, data: challenges });
   } catch (error) {
+    next(error);
+  }
+};
+
+
+export const getQualifiedParticipants = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const challengeId = req.params.id;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const size = Math.min(100, Math.max(1, Number(req.query.size || req.query.limit) || 20));
+
+    const result = await challengeService.getQualifiedParticipants(challengeId, page, size);
+    res.status(200).json({ success: true, ...result });
+  } catch (error: any) {
+    if (error.status) {
+      res.status(error.status).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+};
+
+export const subscribeAnnouncement = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const challengeId = req.params.id;
+    const { notify } = req.body ?? {};
+
+    if (typeof notify !== 'boolean') {
+      res.status(400).json({ success: false, message: 'notify (boolean) is required' });
+      return;
+    }
+
+    const result = await challengeService.subscribeAnnouncement(challengeId, req.user!.id, notify);
+    res.status(200).json({ status: 'success', success: true, ...result });
+  } catch (error: any) {
+    if (error.status) {
+      res.status(error.status).json({ success: false, message: error.message });
+      return;
+    }
     next(error);
   }
 };
