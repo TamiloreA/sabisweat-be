@@ -6,6 +6,8 @@
 
 export type ChallengeGoalType = 'daily_step' | 'steps_goal' | 'most_steps' | 'steps';
 
+export type ChallengeCreatorType = 'sabi_sweat' | 'club';
+
 export interface CreateChallengeInput {
   title: string;
   subtitle?: string;
@@ -30,6 +32,7 @@ export interface CreateChallengeInput {
   hostClubId?: string;
   coHostClubId?: string;
   isOfficial?: boolean;
+  creatorType?: ChallengeCreatorType;
   hasPrizeDraw?: boolean;
   prizeAmount?: number;
   prizeCurrency?: string;
@@ -63,6 +66,7 @@ export interface ChallengeRow {
   host_club_id: string | null;
   co_host_club_id?: string | null;
   is_official?: boolean;
+  creator_type?: ChallengeCreatorType | string | null;
   has_prize_draw?: boolean;
   prize_amount?: number | null;
   prize_currency?: string | null;
@@ -166,6 +170,7 @@ export interface ChallengeResponse {
   host?: ChallengeHost;
   coHosts?: ChallengeHost[];
   isOfficial?: boolean;
+  creatorType?: ChallengeCreatorType;
   hasPrizeDraw?: boolean;
   prizeAmount?: number;
   prizeCurrency?: string;

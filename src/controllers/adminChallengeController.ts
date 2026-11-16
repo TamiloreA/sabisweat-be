@@ -62,6 +62,7 @@ export const createAdminChallenge = async (req: Request, res: Response, next: Ne
         country: typeof country === 'string' ? country.trim() : (cityTag === 'London' ? 'United Kingdom' : 'Nigeria'),
         region: typeof region === 'string' ? region.trim() : cityTag,
         isOfficial: true,
+        creatorType: 'sabi_sweat',
         hostName: 'Sabi Sweat',
         whoCanJoin: 'everyone',
         leaderboardVisibility: 'public',
@@ -82,6 +83,7 @@ export const createAdminChallenge = async (req: Request, res: Response, next: Ne
       goalValue: challenge.goalValue || 0,
       published: true,
       visible: true,
+      creatorType: challenge.creatorType || 'sabi_sweat',
     });
   } catch (error: any) {
     if (error.status) {
@@ -132,6 +134,7 @@ export const getAdminChallengeOverview = async (req: Request, res: Response, nex
       rewardText: c.reward_text || '',
       cityTag: c.city_tag || '',
       isOfficial: Boolean(c.is_official),
+      creatorType: (c.creator_type === 'sabi_sweat' ? 'sabi_sweat' : 'club'),
       hasPrizeDraw: Boolean(c.has_prize_draw),
       prizeAmount: c.prize_amount,
       prizeCurrency: c.prize_currency,

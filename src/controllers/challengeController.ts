@@ -217,6 +217,7 @@ export const createChallenge = async (req: Request, res: Response, next: NextFun
         prizeCurrency: typeof prizeCurrency === 'string' ? prizeCurrency.trim() : undefined,
         startAt: startAt.trim(),
         endAt: endAt.trim(),
+        creatorType: 'club',
         whoCanJoin: typeof whoCanJoin === 'string' && ['everyone', 'club_members'].includes(whoCanJoin) ? whoCanJoin : undefined,
         leaderboardVisibility: typeof leaderboardVisibility === 'string' && ['public', 'private'].includes(leaderboardVisibility) ? leaderboardVisibility : undefined,
       },

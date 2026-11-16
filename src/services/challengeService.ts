@@ -19,6 +19,7 @@ import type {
   WinnerInfo,
   QualifiedParticipant,
   QualifiedParticipantsResponse,
+  ChallengeCreatorType,
 } from '../models/challengeModel';
 import type { CompletedChallengeDetail } from '../models/achievementModel';
 import { handleChallengeCreatedEvent } from './notificationEventService';
@@ -476,6 +477,7 @@ function mapChallengeRow(
   }
 
   const isEligiblePrizeChallenge = Boolean(row.is_official && row.has_prize_draw);
+  const creatorType: ChallengeCreatorType = row.creator_type === 'sabi_sweat' ? 'sabi_sweat' : 'club';
 
   return {
     id: row.id,
@@ -491,6 +493,7 @@ function mapChallengeRow(
     host,
     coHosts,
     isOfficial: Boolean(row.is_official),
+    creatorType,
     hasPrizeDraw: Boolean(row.has_prize_draw),
     prizeAmount: row.prize_amount != null ? Number(row.prize_amount) : undefined,
     prizeCurrency: row.prize_currency || 'NGN',
@@ -1447,6 +1450,7 @@ export async function createChallenge(
     host_club_id: hostClubId,
     co_host_club_id: input.coHostClubId ?? null,
     is_official: Boolean(input.isOfficial),
+    creator_type: input.creatorType === 'sabi_sweat' ? 'sabi_sweat' : 'club',
     has_prize_draw: Boolean(input.hasPrizeDraw),
     prize_amount: input.prizeAmount ?? 0,
     prize_currency: input.prizeCurrency ?? 'NGN',
@@ -1467,12 +1471,15 @@ export async function createChallenge(
     .select()
     .single();
 
-  if (insertError && (insertError.message?.includes('hero_image_base64') || insertError.message?.includes('reward_id'))) {
+  if (insertError && (insertError.message?.includes('hero_image_base64') || insertError.message?.includes('reward_id') || insertError.message?.includes('creator_type'))) {
     if (insertError.message?.includes('hero_image_base64')) {
       delete rowToInsert.hero_image_base64;
     }
     if (insertError.message?.includes('reward_id')) {
       delete rowToInsert.reward_id;
+    }
+    if (insertError.message?.includes('creator_type')) {
+      delete rowToInsert.creator_type;
     }
     const retry = await supabase
       .from(CHALLENGES_TABLE)
@@ -1485,8 +1492,13 @@ export async function createChallenge(
 
   if (insertError) throw insertError;
 
-  if (created && input.rewardId && created.reward_id === undefined) {
-    created.reward_id = input.rewardId;
+  if (created) {
+    if (input.rewardId && created.reward_id === undefined) {
+      created.reward_id = input.rewardId;
+    }
+    if (created.creator_type === undefined) {
+      created.creator_type = input.creatorType === 'sabi_sweat' ? 'sabi_sweat' : 'club';
+    }
   }
 
   // Asynchronously dispatch challenge discovery notifications based on club privacy
