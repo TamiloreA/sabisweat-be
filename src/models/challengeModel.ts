@@ -110,8 +110,17 @@ export interface ChallengeHost {
   theme?: ClubTheme | string;
 }
 
+export interface ParticipantUserProfile {
+  id: string;
+  username?: string;
+  displayName?: string;
+  photoUrl?: string;
+  avatarId?: string;
+}
+
 export interface WinnerInfo {
   id: string;
+  user?: ParticipantUserProfile;
   username?: string;
   displayName?: string;
   photoUrl?: string;
@@ -121,6 +130,7 @@ export interface WinnerInfo {
 
 export interface QualifiedParticipant {
   id: string;
+  user?: ParticipantUserProfile;
   username?: string;
   displayName?: string;
   photoUrl?: string;

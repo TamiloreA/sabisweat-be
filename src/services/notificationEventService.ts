@@ -1476,7 +1476,7 @@ export async function handleChallengeWinnerSelectionEvent(
     .single();
 
   if (cErr || !challenge) return { winnerId: null, notifiedSubscribersCount: 0 };
-  if (!challenge.has_prize_draw) return { winnerId: null, notifiedSubscribersCount: 0 };
+  if (!challenge.has_prize_draw || !challenge.is_official) return { winnerId: null, notifiedSubscribersCount: 0 };
   if (challenge.winner_user_id) return { winnerId: challenge.winner_user_id, notifiedSubscribersCount: 0 };
 
   const now = new Date();

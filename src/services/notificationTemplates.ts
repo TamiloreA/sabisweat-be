@@ -432,12 +432,14 @@ export const notificationTemplates = {
     const validImage = sanitizeImageUrl(imageUrl);
     return {
       category: PUSH_CATEGORIES.CHALLENGE_UPDATE,
-      title: 'You won! 🏆',
+      title: 'Champion 🏆',
       body: `Congratulations! You won the grand prize for ${challengeTitle}!`,
       imageUrl: validImage,
       data: {
         screen: 'ChallengeOverview',
+        challengeId,
         params: { challengeId },
+        deeplink: `sabisweat://challenges/${challengeId}`,
         type: 'challenge_winner',
         ...(validImage ? { imageUrl: validImage } : {}),
       },
@@ -460,7 +462,9 @@ export const notificationTemplates = {
       imageUrl: validImage,
       data: {
         screen: 'ChallengeOverview',
+        challengeId,
         params: { challengeId },
+        deeplink: `sabisweat://challenges/${challengeId}`,
         type: 'challenge_winners_announced',
         ...(validImage ? { imageUrl: validImage } : {}),
       },

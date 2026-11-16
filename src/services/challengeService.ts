@@ -460,6 +460,13 @@ function mapChallengeRow(
     const userObj = winnerProfile ? mapProfileToUser(winnerProfile, row.winner_user_id) : { id: row.winner_user_id };
     winner = {
       id: row.winner_user_id,
+      user: {
+        id: row.winner_user_id,
+        username: userObj.username,
+        displayName: userObj.displayName,
+        photoUrl: userObj.photoUrl,
+        avatarId: userObj.avatarId,
+      },
       username: userObj.username,
       displayName: userObj.displayName,
       photoUrl: userObj.photoUrl,
@@ -467,6 +474,8 @@ function mapChallengeRow(
       announcedAt: row.winner_announced_at || row.winner_selected_at || announcementTime.toISOString(),
     };
   }
+
+  const isEligiblePrizeChallenge = Boolean(row.is_official && row.has_prize_draw);
 
   return {
     id: row.id,
@@ -486,10 +495,10 @@ function mapChallengeRow(
     prizeAmount: row.prize_amount != null ? Number(row.prize_amount) : undefined,
     prizeCurrency: row.prize_currency || 'NGN',
     status,
-    announcementAt: announcementTime.toISOString(),
+    announcementAt: isEligiblePrizeChallenge ? announcementTime.toISOString() : undefined,
     serverTime: now.toISOString(),
     winner,
-    subscribedAnnouncement: Boolean(participantInfo?.notifyAnnouncement),
+    subscribedAnnouncement: isEligiblePrizeChallenge ? Boolean(participantInfo?.notifyAnnouncement) : undefined,
     sponsorText: row.sponsor_text ?? undefined,
     cityTag: row.city_tag ?? undefined,
     country: row.country ?? undefined,
@@ -1670,6 +1679,13 @@ export async function getQualifiedParticipants(
     const userObj = mapProfileToUser(wp, challenge.winner_user_id);
     winner = {
       id: challenge.winner_user_id,
+      user: {
+        id: challenge.winner_user_id,
+        username: userObj.username,
+        displayName: userObj.displayName,
+        photoUrl: userObj.photoUrl,
+        avatarId: userObj.avatarId,
+      },
       username: userObj.username,
       displayName: userObj.displayName,
       photoUrl: userObj.photoUrl,
@@ -1694,6 +1710,13 @@ export async function getQualifiedParticipants(
     const userObj = mapProfileToUser(profile, q.userId);
     return {
       id: q.userId,
+      user: {
+        id: q.userId,
+        username: userObj.username,
+        displayName: userObj.displayName,
+        photoUrl: userObj.photoUrl,
+        avatarId: userObj.avatarId,
+      },
       username: userObj.username,
       displayName: userObj.displayName,
       photoUrl: userObj.photoUrl,
@@ -1720,13 +1743,33 @@ export async function getQualifiedParticipants(
 /**
  * POST /challenges/:id/subscribe-announcement
  * Subscribe or unsubscribe from winner announcement push notification.
+ * Applies EXCLUSIVELY to official Sabi Sweat challenges that have a prize draw.
  */
 export async function subscribeAnnouncement(
   challengeId: string,
   userId: string,
   notify: boolean
 ): Promise<{ subscribed: boolean }> {
-  // Verify participant exists and is active
+  // 1. Verify challenge exists and is eligible (official Sabi Sweat challenge with prize draw)
+  const { data: challenge, error: cErr } = await supabase
+    .from(CHALLENGES_TABLE)
+    .select('id, is_official, has_prize_draw')
+    .eq('id', challengeId)
+    .maybeSingle();
+
+  if (cErr || !challenge) {
+    throw { status: 404, message: 'Challenge not found' };
+  }
+
+  if (!challenge.is_official || !challenge.has_prize_draw) {
+    throw {
+      status: 400,
+      error: 'NOT_ELIGIBLE',
+      message: 'Winner announcement subscription is only available for official Sabi Sweat prize draw challenges',
+    };
+  }
+
+  // 2. Verify participant exists and is active
   const { data: participant, error: pError } = await supabase
     .from(PARTICIPANTS_TABLE)
     .select('id, left_at')
