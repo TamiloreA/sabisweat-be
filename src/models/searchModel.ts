@@ -14,6 +14,7 @@ export interface SearchQueryParams {
   country?: string;
   region?: string;
   excludeClubId?: string;
+  userId?: string;
 }
 
 export interface SearchChallengeItem {

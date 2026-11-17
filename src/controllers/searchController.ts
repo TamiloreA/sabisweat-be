@@ -84,6 +84,7 @@ export async function search(req: Request, res: Response): Promise<void> {
     const country = typeof req.query.country === 'string' ? req.query.country.trim() : undefined;
     const region = typeof req.query.region === 'string' ? req.query.region.trim() : undefined;
     const excludeClubId = typeof req.query.excludeClubId === 'string' ? req.query.excludeClubId.trim() : undefined;
+    const userId = (req as any).user?.id || (req as any).user?.sub;
 
     // 5. Execute search
     const searchResponse = await performSearch({
@@ -94,6 +95,7 @@ export async function search(req: Request, res: Response): Promise<void> {
       country,
       region,
       excludeClubId,
+      userId,
     });
 
     res.status(200).json(searchResponse);

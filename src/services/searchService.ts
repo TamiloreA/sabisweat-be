@@ -529,7 +529,7 @@ async function getClubMemberCount(clubId: string, fallbackCount: number = 0): Pr
 
 export async function search(params: SearchQueryParams): Promise<SearchResponse> {
   const startTime = Date.now();
-  const { q, types, limit, offset, country, region, excludeClubId } = params;
+  const { q, types, limit, offset, country, region, excludeClubId, userId } = params;
 
   const results: SearchResults = {};
 
@@ -626,14 +626,16 @@ export async function search(params: SearchQueryParams): Promise<SearchResponse>
   if (types.includes('clubs')) {
     searchTasks.push(
       (async () => {
-        // Query eligible clubs: status approved, visible
-        let query = supabase
-          .from(CLUBS_TABLE)
-          .select('*')
-          .eq('status', 'approved')
-          .order('created_at', { ascending: false });
+        // Query eligible clubs: status approved OR (pending AND created_by user)
+        let query = supabase.from(CLUBS_TABLE).select('*');
 
-        const { data: clubs, error } = await query;
+        if (userId) {
+          query = query.or(`status.eq.approved,and(status.eq.pending,created_by.eq.${userId})`);
+        } else {
+          query = query.eq('status', 'approved');
+        }
+
+        const { data: clubs, error } = await query.order('created_at', { ascending: false });
         if (error) {
           throw error;
         }
@@ -641,8 +643,8 @@ export async function search(params: SearchQueryParams): Promise<SearchResponse>
         const eligible = (clubs || []).filter((club: any) => {
           // Exclude soft-deleted
           if (club.deleted_at != null) return false;
-          // Exclude private clubs
-          if (club.is_private === true || club.visible === false) {
+          // Exclude invisible or invite-only clubs
+          if (club.visible === false || club.is_invite_only === true) {
             return false;
           }
           // Exclude specified club if excludeClubId provided (e.g. primary host club)

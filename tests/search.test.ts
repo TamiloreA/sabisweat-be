@@ -66,6 +66,7 @@ jest.mock('../src/config/database', () => {
       country_code: 'NG',
       regions: ['Lagos'],
       status: 'approved',
+      is_private: true, // Specifically private membership — must still be searchable
       visible: true,
       theme: 'green',
       profile_image_url: 'https://example.com/club1.jpg',
@@ -76,12 +77,13 @@ jest.mock('../src/config/database', () => {
       id: 'club2_gb_london',
       name: 'London Runners Club',
       tag: 'runners',
-      description: 'UK running enthusiasts',
+      description: 'UK runners enthusiasts',
       location_text: 'London',
       country: 'United Kingdom',
       country_code: 'GB',
       regions: ['London'],
       status: 'approved',
+      is_private: true,
       visible: true,
       theme: 'blue',
       profile_image_url: 'https://example.com/club2.jpg',
@@ -98,6 +100,7 @@ jest.mock('../src/config/database', () => {
       country_code: 'NG',
       regions: ['Abuja'],
       status: 'approved',
+      is_private: false,
       visible: true,
       theme: 'orange',
       profile_image_url: 'https://example.com/club3.jpg',
@@ -107,8 +110,38 @@ jest.mock('../src/config/database', () => {
     {
       id: 'club4_pending',
       name: 'Pending Run Squad',
-      status: 'pending', // should be excluded
+      tag: 'pending',
+      status: 'pending',
+      created_by: 'user_creator_123',
       visible: true,
+    },
+    {
+      id: 'club5_invite_only',
+      name: 'Secret Invite Runners',
+      tag: 'invite',
+      status: 'approved',
+      is_invite_only: true,
+      visible: true,
+    },
+    {
+      id: 'club6_soft_deleted',
+      name: 'Deleted Runners Club',
+      tag: 'deleted',
+      status: 'approved',
+      visible: false,
+    },
+    {
+      id: 'club7_global',
+      name: 'Global Striders Club',
+      tag: 'global',
+      description: 'Worldwide running collective',
+      location_text: 'Global',
+      location_scope: 'global',
+      status: 'approved',
+      visible: true,
+      theme: 'purple',
+      members_count: 1000,
+      created_at: new Date(Date.now() - 86400000 * 15).toISOString(),
     },
   ];
 
@@ -157,7 +190,22 @@ jest.mock('../src/config/database', () => {
           if (table === 'clubs') {
             return {
               select: jest.fn().mockReturnThis(),
-              eq: jest.fn().mockReturnThis(),
+              eq: jest.fn((field: string, val: any) => {
+                const filtered = mockClubs.filter((c: any) => c[field] === val);
+                return {
+                  order: jest.fn().mockResolvedValue({ data: filtered, error: null }),
+                };
+              }),
+              or: jest.fn((orClause: string) => {
+                const match = orClause.match(/created_by\.eq\.([a-zA-Z0-9_-]+)/);
+                const uid = match ? match[1] : null;
+                const filtered = mockClubs.filter(
+                  (c: any) => c.status === 'approved' || (c.status === 'pending' && c.created_by === uid)
+                );
+                return {
+                  order: jest.fn().mockResolvedValue({ data: filtered, error: null }),
+                };
+              }),
               order: jest.fn().mockResolvedValue({ data: mockClubs, error: null }),
             };
           }
@@ -389,6 +437,205 @@ describe('Search Filter Engine - Unit Tests', () => {
       expect(item?.memberCount).toBe(250);
       expect(item?.clubTheme).toBe('green');
       expect(item?.status).toBe('active');
+    });
+  });
+
+  describe('Club Search Regression & Scenarios (Prompt Compliance)', () => {
+    it('Scenario 1: Exact club name match', async () => {
+      const response = await search({
+        q: 'Eko Runners Club',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+      });
+
+      const items = response.results.clubs?.items || [];
+      expect(items.length).toBeGreaterThan(0);
+      expect(items[0].name).toBe('Eko Runners Club');
+      expect(items[0].id).toBe('club1_ng_lagos');
+    });
+
+    it('Scenario 2: Partial club name match', async () => {
+      const response = await search({
+        q: 'Runners',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+      });
+
+      const items = response.results.clubs?.items || [];
+      expect(items.length).toBeGreaterThan(0);
+      expect(items.some((c) => c.name.includes('Runners'))).toBe(true);
+    });
+
+    it('Scenario 3: Different casing (upper, lower, mixed)', async () => {
+      const lowerRes = await search({
+        q: 'eko runners club',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+      });
+      const upperRes = await search({
+        q: 'EKO RUNNERS CLUB',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+      });
+      const mixedRes = await search({
+        q: 'eKo RuNnErS',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+      });
+
+      expect(lowerRes.results.clubs?.items[0]?.id).toBe('club1_ng_lagos');
+      expect(upperRes.results.clubs?.items[0]?.id).toBe('club1_ng_lagos');
+      expect(mixedRes.results.clubs?.items[0]?.id).toBe('club1_ng_lagos');
+    });
+
+    it('Scenario 4: Requests with both country and region', async () => {
+      const response = await search({
+        q: 'Runners',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+        country: 'NG',
+        region: 'Lagos',
+      });
+
+      const items = response.results.clubs?.items || [];
+      expect(items.length).toBeGreaterThan(0);
+      // Club in NG + Lagos ranks first due to location boost (+30)
+      expect(items[0].id).toBe('club1_ng_lagos');
+    });
+
+    it('Scenario 5: Requests with only country', async () => {
+      const response = await search({
+        q: 'Runners',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+        country: 'GB',
+      });
+
+      const items = response.results.clubs?.items || [];
+      expect(items.length).toBeGreaterThan(0);
+      // Club in GB ranks first due to country boost (+15)
+      expect(items[0].id).toBe('club2_gb_london');
+    });
+
+    it('Scenario 6: Requests with neither country nor region', async () => {
+      const response = await search({
+        q: 'Runners',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+      });
+
+      const items = response.results.clubs?.items || [];
+      expect(items.length).toBeGreaterThanOrEqual(3);
+      expect(response.results.clubs?.total).toBeGreaterThanOrEqual(3);
+    });
+
+    it('Scenario 7: Global clubs with country and region parameters present', async () => {
+      // Searching for 'Global' with NG/Lagos location specified should NOT exclude global club
+      const response = await search({
+        q: 'Global Striders',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+        country: 'NG',
+        region: 'Lagos',
+      });
+
+      const items = response.results.clubs?.items || [];
+      expect(items.length).toBeGreaterThan(0);
+      expect(items[0].id).toBe('club7_global');
+      expect(items[0].name).toBe('Global Striders Club');
+    });
+
+    it('Scenario 8: Non-matching queries handle empty results cleanly', async () => {
+      const response = await search({
+        q: 'ZzzNonExistentClubXyz999',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+      });
+
+      expect(response.results.clubs).toBeDefined();
+      expect(response.results.clubs?.total).toBe(0);
+      expect(response.results.clubs?.items).toEqual([]);
+    });
+
+    it('Scenario 9: Multi-word queries', async () => {
+      const response = await search({
+        q: 'London Runners Club',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+      });
+
+      const items = response.results.clubs?.items || [];
+      expect(items.length).toBeGreaterThan(0);
+      expect(items[0].id).toBe('club2_gb_london');
+      expect(items[0].name).toBe('London Runners Club');
+    });
+
+    it('Scenario 10: Private clubs (is_private=true) are discoverable in search', async () => {
+      // Both club1 and club2 have is_private: true (matching production migration 033 state)
+      const response = await search({
+        q: 'London Runners',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+      });
+
+      const items = response.results.clubs?.items || [];
+      expect(items.length).toBeGreaterThan(0);
+      expect(items[0].id).toBe('club2_gb_london');
+    });
+
+    it('Scenario 11: Excludes invite-only clubs and soft-deleted clubs', async () => {
+      const response = await search({
+        q: 'Runners',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+      });
+
+      const items = response.results.clubs?.items || [];
+      const ids = items.map((c) => c.id);
+      expect(ids).not.toContain('club5_invite_only');
+      expect(ids).not.toContain('club6_soft_deleted');
+    });
+
+    it('Scenario 12: Includes user pending club when userId matches creator', async () => {
+      // club4_pending has created_by: 'user_creator_123'
+      const response = await search({
+        q: 'Pending Run Squad',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+        userId: 'user_creator_123',
+      });
+
+      const items = response.results.clubs?.items || [];
+      expect(items.length).toBeGreaterThan(0);
+      expect(items[0].id).toBe('club4_pending');
+      expect(items[0].name).toBe('Pending Run Squad');
+    });
+
+    it('Scenario 13: Excludes user pending club when userId does not match', async () => {
+      const response = await search({
+        q: 'Pending Run Squad',
+        types: ['clubs'],
+        limit: 15,
+        offset: 0,
+        userId: 'different_user_456',
+      });
+
+      const items = response.results.clubs?.items || [];
+      expect(items.some((c) => c.id === 'club4_pending')).toBe(false);
     });
   });
 

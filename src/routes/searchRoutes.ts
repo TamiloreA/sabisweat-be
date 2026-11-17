@@ -164,6 +164,6 @@ const router = Router();
  *                   type: string
  *                   example: "Something went wrong."
  */
-router.get('/', searchRateLimiter, requireAuth, search);
+router.get('/', requireAuth, searchRateLimiter, search);
 
 export default router;
