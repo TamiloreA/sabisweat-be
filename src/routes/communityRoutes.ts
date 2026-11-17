@@ -17,6 +17,7 @@ import {
   getClubEvents,
   rsvpClubEvent,
   requestJoinClub,
+  leaveClub,
   cancelJoinRequest,
   getClubJoinRequests,
   resolveJoinRequest,
@@ -1093,6 +1094,8 @@ router.get('/posts/:id/poll/results', requireAuth, getCommunityPollResult);
  *         description: Join request submitted or accepted
  */
 router.post('/clubs/:id/join', requireAuth, requestJoinClub);
+router.post('/clubs/:id/leave', requireAuth, leaveClub);
+router.delete('/clubs/:id/join', requireAuth, leaveClub);
 
 /**
  * @openapi

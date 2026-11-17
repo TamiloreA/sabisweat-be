@@ -307,6 +307,33 @@ export const requestJoinClub = async (req: Request, res: Response, next: NextFun
   }
 };
 
+export const leaveClub = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const clubId = req.params.id || req.params.clubId;
+    if (!clubId) {
+      res.status(400).json({ success: false, message: 'clubId is required' });
+      return;
+    }
+    const result = await communityService.leaveClub(clubId, req.user!.id);
+    res.status(200).json({
+      success: true,
+      message: 'Left club successfully',
+      joined: result.joined,
+      membersCount: result.membersCount,
+      data: result,
+    });
+  } catch (error: any) {
+    if (error.statusCode || error.status) {
+      res.status(error.statusCode || error.status).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+    next(error);
+  }
+};
+
 export const cancelJoinRequest = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const clubId = req.params.clubId || req.params.id;

@@ -1437,6 +1437,68 @@ export async function requestJoinClub(clubId: string, userId: string): Promise<J
   return { joined: false, membersCount: count ?? 0 };
 }
 
+export async function leaveClub(clubId: string, userId: string): Promise<JoinClubResult> {
+  // 1. Fetch club to check existence and ownership
+  const { data: club, error: clubErr } = await supabase
+    .from(CLUBS_TABLE)
+    .select('id, name, created_by')
+    .eq('id', clubId)
+    .maybeSingle();
+
+  if (clubErr) throw clubErr;
+  if (!club) {
+    const err: any = new Error('Club not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  // 2. Prevent club creator from leaving without transferring ownership
+  if (club.created_by === userId) {
+    const err: any = new Error('Club owners cannot leave their own club');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 3. Verify user is currently an active member
+  const { data: member, error: memberErr } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('role')
+    .eq('club_id', clubId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (memberErr) throw memberErr;
+  if (!member) {
+    const err: any = new Error('You are not a member of this club');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // 4. Remove member record
+  const { error: deleteErr } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .delete()
+    .eq('club_id', clubId)
+    .eq('user_id', userId);
+
+  if (deleteErr) throw deleteErr;
+
+  // 5. Clean up any lingering join requests
+  await supabase
+    .from('club_join_requests')
+    .delete()
+    .eq('club_id', clubId)
+    .eq('user_id', userId);
+
+  // 6. Get updated member count
+  const { count } = await supabase
+    .from(CLUB_MEMBERS_TABLE)
+    .select('*', { count: 'exact', head: true })
+    .eq('club_id', clubId);
+
+  return { joined: false, membersCount: count ?? 0 };
+}
+
 export async function cancelJoinRequest(
   clubId: string,
   userId: string
