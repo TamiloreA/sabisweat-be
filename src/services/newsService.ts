@@ -135,38 +135,52 @@ export async function getNews(userId?: string): Promise<NewsItem[]> {
   if (!rows?.length) return [];
 
   const ids = rows.map((r) => r.id);
-  const counts = await getCounts(ids, userId);
+  const [counts, polls] = await Promise.all([
+    getCounts(ids, userId),
+    Promise.all(
+      rows.map((row) => (row.kind === 'poll' ? getPollForNews(row.id, userId) : Promise.resolve(null)))
+    ),
+  ]);
 
-  const items: NewsItem[] = [];
-  for (const row of rows) {
-    const poll = row.kind === 'poll' ? await getPollForNews(row.id, userId) : null;
-    items.push(toNewsItem(row, counts, poll));
-  }
-  return items;
+  return rows.map((row, index) => toNewsItem(row, counts, polls[index]));
 }
 
 export async function getNewsById(id: string, userId?: string): Promise<NewsDetail | null> {
-  const { data: row, error } = await supabase
-    .from(NEWS_TABLE)
-    .select('*')
-    .eq('id', id)
-    .single();
+  const [newsRes, likesRes, commentsRes] = await Promise.all([
+    supabase
+      .from(NEWS_TABLE)
+      .select('*')
+      .eq('id', id)
+      .single(),
+    supabase
+      .from(LIKES_TABLE)
+      .select('news_id, user_id')
+      .eq('news_id', id),
+    supabase
+      .from(COMMENTS_TABLE)
+      .select('id, text, created_at, user_id, author:profiles!news_comments_user_id_fkey(id, username, first_name, last_name, photo_url, photo_base64, avatar_id)')
+      .eq('news_id', id)
+      .order('created_at', { ascending: false }),
+  ]);
 
+  const { data: row, error } = newsRes;
   if (error || !row) return null;
+  if (commentsRes.error) throw commentsRes.error;
 
-  const counts = await getCounts([id], userId);
+  const commentRows = commentsRes.data ?? [];
+  const likesRows = likesRes.data ?? [];
+
+  const likes = new Map<string, number>([[id, likesRows.length]]);
+  const commentsCountMap = new Map<string, number>([[id, commentRows.length]]);
+  const likedByMe = new Set<string>();
+  if (userId && likesRows.some((like) => like.user_id === userId)) {
+    likedByMe.add(id);
+  }
+
   const poll = row.kind === 'poll' ? await getPollForNews(id, userId) : null;
-  const item = toNewsItem(row, counts, poll);
+  const item = toNewsItem(row, { likes, comments: commentsCountMap, likedByMe }, poll);
 
-  const { data: commentRows, error: commentsError } = await supabase
-    .from(COMMENTS_TABLE)
-    .select('id, text, created_at, user_id, author:profiles!news_comments_user_id_fkey(id, username, first_name, last_name, photo_url, photo_base64, avatar_id)')
-    .eq('news_id', id)
-    .order('created_at', { ascending: false });
-
-  if (commentsError) throw commentsError;
-
-  const comments: NewsCommentItem[] = (commentRows ?? []).map((c: any) => ({
+  const comments: NewsCommentItem[] = commentRows.map((c: any) => ({
     id: c.id,
     text: c.text,
     createdAt: c.created_at,
