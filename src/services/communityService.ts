@@ -867,13 +867,45 @@ export async function getPostById(postId: string, userId?: string): Promise<Feed
 
   const postAuthorId = post.author_id || post.user_id;
 
-  const [profileMap, likesRes, commentsRes] = await Promise.all([
+  const [profileMap, likesRes, commentsRes, pollOptionsRes, pollVotesRes] = await Promise.all([
     fetchProfilesMap([postAuthorId]),
     supabase.from(LIKES_TABLE).select('user_id').eq('post_id', postId),
     supabase.from(COMMENTS_TABLE).select('id').eq('post_id', postId),
+    supabase.from(POLL_OPTIONS_TABLE).select('*').eq('post_id', postId).order('created_at', { ascending: true }),
+    userId
+      ? supabase.from(POLL_VOTES_TABLE).select('option_id').eq('user_id', userId)
+      : Promise.resolve({ data: [] }),
   ]);
 
   const likes = likesRes.data ?? [];
+  const postOptions = pollOptionsRes.data ?? [];
+  const myVotedOptionIds = new Set((pollVotesRes.data ?? []).map((v: any) => v.option_id));
+
+  let pollOptions: FeedPost['pollOptions'] = undefined;
+  if (postOptions.length > 0) {
+    const optionIds = postOptions.map((o: any) => o.id);
+    const { data: allVotesData } = await supabase
+      .from(POLL_VOTES_TABLE)
+      .select('option_id')
+      .in('option_id', optionIds);
+
+    const voteCounts = new Map<string, number>();
+    for (const v of allVotesData ?? []) {
+      voteCounts.set(v.option_id, (voteCounts.get(v.option_id) ?? 0) + 1);
+    }
+
+    const totalVotes = postOptions.reduce((acc: number, o: any) => acc + (voteCounts.get(o.id) ?? 0), 0);
+    pollOptions = postOptions.map((o: any) => {
+      const votesCount = voteCounts.get(o.id) ?? 0;
+      return {
+        id: o.id,
+        text: o.text,
+        votesCount,
+        percent: totalVotes > 0 ? Math.round((votesCount / totalVotes) * 100) : 0,
+        votedByMe: myVotedOptionIds.has(o.id),
+      };
+    });
+  }
 
   const resolved = resolvePostTags(post);
   return {
@@ -891,6 +923,7 @@ export async function getPostById(postId: string, userId?: string): Promise<Feed
     likedByMe: userId ? likes.some((like) => like.user_id === userId) : false,
     author: mapAuthor(profileMap.get(postAuthorId), postAuthorId),
     clubId: post.club_id,
+    pollOptions,
     createdAt: post.created_at,
   };
 }
