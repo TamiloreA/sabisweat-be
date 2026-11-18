@@ -236,7 +236,7 @@ router.get('/available', requireAuth, getAvailableChallenges);
  * /challenges/past:
  *   get:
  *     summary: Get past challenges (paginated)
- *     description: Returns challenges whose endAt timestamp has elapsed, ordered by most recently ended (endAt DESC).
+ *     description: Returns past challenges joined by the authenticated user whose endAt timestamp has elapsed, ordered by most recently ended (endAt DESC).
  *     tags: [Challenges]
  *     security:
  *       - bearerAuth: []

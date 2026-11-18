@@ -724,7 +724,7 @@ export async function getAvailableChallenges(
 
 /**
  * GET /challenges/past
- * Returns challenges whose endAt timestamp has elapsed, ordered by endAt DESC (paginated).
+ * Returns challenges joined by the user whose endAt timestamp has elapsed, ordered by endAt DESC (paginated).
  */
 export async function getPastChallenges(
   userId?: string,
@@ -735,10 +735,44 @@ export async function getPastChallenges(
   const pageSize = Math.max(1, size);
   const now = new Date().toISOString();
 
-  // 1. Query challenges whose end_at is in the past, ordered by most recently ended first
+  if (!userId) {
+    return { page: currentPage, size: pageSize, total: 0, hasMore: false, data: [] };
+  }
+
+  // 1. Get user's active participations
+  let participations: any[] | null = null;
+  let pError: any = null;
+  const initialFetch = await supabase
+    .from(PARTICIPANTS_TABLE)
+    .select('challenge_id, joined_at, claimed_at, notify_announcement')
+    .eq('user_id', userId)
+    .is('left_at', null);
+
+  if (initialFetch.error && initialFetch.error.message?.includes('notify_announcement')) {
+    const fallbackFetch = await supabase
+      .from(PARTICIPANTS_TABLE)
+      .select('challenge_id, joined_at, claimed_at')
+      .eq('user_id', userId)
+      .is('left_at', null);
+    participations = fallbackFetch.data;
+    pError = fallbackFetch.error;
+  } else {
+    participations = initialFetch.data;
+    pError = initialFetch.error;
+  }
+
+  if (pError) throw pError;
+  if (!participations || participations.length === 0) {
+    return { page: currentPage, size: pageSize, total: 0, hasMore: false, data: [] };
+  }
+
+  const joinedChallengeIds = participations.map((p) => p.challenge_id);
+
+  // 2. Query only joined challenges whose end_at is in the past, ordered by most recently ended first
   const { data: challenges, error: cError } = await supabase
     .from(CHALLENGES_TABLE)
     .select('*')
+    .in('id', joinedChallengeIds)
     .lt('end_at', now)
     .order('end_at', { ascending: false });
 
@@ -756,26 +790,8 @@ export async function getPastChallenges(
     return { page: currentPage, size: pageSize, total, hasMore: false, data: [] };
   }
 
-  const pageChallengeIds = pageChallenges.map((c) => c.id);
-
-  // 2. If userId is provided, get user's participations for these challenges
-  let partMap = new Map<string, { joined: boolean; joinedAt?: string; claimedAt?: string | null }>();
-  if (userId) {
-    const { data: participations } = await supabase
-      .from(PARTICIPANTS_TABLE)
-      .select('challenge_id, joined_at, claimed_at')
-      .eq('user_id', userId)
-      .in('challenge_id', pageChallengeIds)
-      .is('left_at', null);
-
-    for (const p of participations ?? []) {
-      partMap.set(p.challenge_id, {
-        joined: true,
-        joinedAt: p.joined_at,
-        claimedAt: p.claimed_at,
-      });
-    }
-  }
+  // Build a map of participations for quick lookup
+  const partMap = new Map(participations.map((p) => [p.challenge_id, p]));
 
   // 3. Resolve clubs for host_club_id and co_host_club_id
   const allClubIds = pageChallenges.flatMap((c) => [c.host_club_id, c.co_host_club_id]);
@@ -785,13 +801,10 @@ export async function getPastChallenges(
   const countPromises = pageChallenges.map((c) => getParticipantsCount(c.id));
   const counts = await Promise.all(countPromises);
 
-  // 5. If user joined any of these, compute their progress too
+  // 5. Compute user progress for each challenge
   const progressPromises = pageChallenges.map((c) => {
     const part = partMap.get(c.id);
-    if (userId && part?.joined) {
-      return computeProgress(userId, c as ChallengeRow, part.joinedAt);
-    }
-    return Promise.resolve(undefined);
+    return computeProgress(userId, c as ChallengeRow, part?.joined_at);
   });
   const progressResults = await Promise.all(progressPromises);
 
@@ -800,7 +813,12 @@ export async function getPastChallenges(
     return mapChallengeRow(
       c as ChallengeRow,
       counts[i],
-      part ?? { joined: false },
+      {
+        joined: true,
+        joinedAt: part?.joined_at,
+        claimedAt: part?.claimed_at ?? null,
+        notifyAnnouncement: part?.notify_announcement,
+      },
       progressResults[i],
       clubsMap.get(c.host_club_id),
       c.co_host_club_id ? clubsMap.get(c.co_host_club_id) : undefined
