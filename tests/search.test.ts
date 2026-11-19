@@ -220,6 +220,52 @@ jest.mock('../src/config/database', () => {
       },
     ];
 
+    const mockPosts = [
+      {
+        id: 'post1_public',
+        title: 'Morning 10K Done!',
+        description: 'Crushed 10,000 steps before breakfast #MorningRun',
+        tag: 'Sabi Sweat',
+        tags: ['Sabi Sweat', 'Hydration'],
+        images_url: ['https://example.com/post1.jpg'],
+        author_id: 'author_tammy',
+        club_id: null,
+        shares_count: 2,
+        created_at: new Date(Date.now() - 3600000).toISOString(),
+      },
+      {
+        id: 'post2_club_only',
+        title: 'Moving Boyz Sunday Meetup',
+        description: 'Meet at Lekki phase 1 gate at 6am',
+        tag: 'Challenge',
+        tags: ['Challenge'],
+        images_url: [],
+        author_id: 'author_alex',
+        club_id: 'club8_moving_boyz',
+        shares_count: 0,
+        created_at: new Date(Date.now() - 7200000).toISOString(),
+      },
+    ];
+
+    const mockProfiles = [
+      {
+        id: 'author_tammy',
+        username: 'tammy_akin',
+        first_name: 'Tammy',
+        last_name: 'Akin',
+        photo_url: 'https://example.com/tammy.jpg',
+        avatar_id: 'av1',
+      },
+      {
+        id: 'author_alex',
+        username: 'alex_stride',
+        first_name: 'Alex',
+        last_name: 'Stride',
+        photo_url: null,
+        avatar_id: 'av2',
+      },
+    ];
+
     return {
       supabase: {
         from: jest.fn((table: string) => {
@@ -278,6 +324,45 @@ jest.mock('../src/config/database', () => {
                 }
                 return Promise.resolve({ count: 250, error: null });
               }),
+            };
+          }
+          if (table === 'posts') {
+            return {
+              select: jest.fn().mockReturnThis(),
+              order: jest.fn().mockReturnValue({
+                limit: jest.fn().mockResolvedValue({ data: mockPosts, error: null }),
+              }),
+            };
+          }
+          if (table === 'profiles') {
+            return {
+              select: jest.fn().mockReturnThis(),
+              in: jest.fn().mockResolvedValue({ data: mockProfiles, error: null }),
+            };
+          }
+          if (table === 'community_likes') {
+            return {
+              select: jest.fn().mockReturnThis(),
+              in: jest.fn().mockResolvedValue({
+                data: [{ post_id: 'post1_public', user_id: 'author_tammy' }],
+                error: null,
+              }),
+            };
+          }
+          if (table === 'community_comments') {
+            return {
+              select: jest.fn().mockReturnThis(),
+              in: jest.fn().mockResolvedValue({
+                data: [{ post_id: 'post1_public' }, { post_id: 'post1_public' }],
+                error: null,
+              }),
+            };
+          }
+          if (table === 'community_poll_options' || table === 'community_poll_votes') {
+            return {
+              select: jest.fn().mockReturnThis(),
+              in: jest.fn().mockResolvedValue({ data: [], error: null }),
+              eq: jest.fn().mockResolvedValue({ data: [], error: null }),
             };
           }
           return {
@@ -785,7 +870,7 @@ describe('Search Filter Engine - Unit Tests', () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         error: 'INVALID_TYPE',
-        message: 'Allowed types: challenges, clubs, help.',
+        message: 'Allowed types: challenges, clubs, help, posts.',
       });
     });
 
@@ -857,6 +942,54 @@ describe('Search Filter Engine - Unit Tests', () => {
       expect(faqs.length).toBeGreaterThan(0);
       expect(faqs.every((f) => f.is_published)).toBe(true);
       expect(faqs[0].order).toBeLessThanOrEqual(faqs[1]?.order ?? 99);
+    });
+  });
+
+  describe('Community Posts & Hashtag Search', () => {
+    it('searches posts by #hashtag (both stored tags and inline #hashtags, with or without spaces)', async () => {
+      const byTagWithHash = await search({
+        q: '#SabiSweat',
+        types: ['posts'],
+        limit: 10,
+        offset: 0,
+        userId: 'author_tammy',
+      });
+
+      const items = byTagWithHash.results.posts?.items || [];
+      expect(items).toHaveLength(1);
+      expect(items[0].id).toBe('post1_public');
+      expect(items[0].tags).toEqual(['Sabi Sweat', 'Hydration']);
+      expect(items[0].counts).toEqual({ likes: 1, comments: 2, shares: 2 });
+      expect(items[0].likedByMe).toBe(true);
+      expect(items[0].author?.username).toBe('tammy_akin');
+
+      const byInlineHashtag = await search({
+        q: '#morningrun',
+        types: ['posts'],
+        limit: 10,
+        offset: 0,
+      });
+      expect(byInlineHashtag.results.posts?.items.some((p) => p.id === 'post1_public')).toBe(true);
+    });
+
+    it('searches posts by text or author and enforces club post visibility', async () => {
+      const nonMemberRes = await search({
+        q: 'Lekki',
+        types: ['posts'],
+        limit: 10,
+        offset: 0,
+        userId: 'other_user',
+      });
+      expect(nonMemberRes.results.posts?.items.some((p) => p.id === 'post2_club_only')).toBe(false);
+
+      const memberRes = await search({
+        q: 'Lekki',
+        types: ['posts'],
+        limit: 10,
+        offset: 0,
+        userId: 'member_moving_boyz',
+      });
+      expect(memberRes.results.posts?.items.some((p) => p.id === 'post2_club_only')).toBe(true);
     });
   });
 

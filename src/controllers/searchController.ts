@@ -47,13 +47,13 @@ export async function search(req: Request, res: Response): Promise<void> {
         if (splitTypes.length === 0) {
           types = defaultTypes;
         } else {
-          const allowedTypes: SearchResourceType[] = ['challenges', 'clubs', 'help'];
+          const allowedTypes: SearchResourceType[] = ['challenges', 'clubs', 'help', 'posts'];
           const isValid = splitTypes.every((t) => (allowedTypes as string[]).includes(t));
 
           if (!isValid) {
             res.status(400).json({
               error: 'INVALID_TYPE',
-              message: 'Allowed types: challenges, clubs, help.',
+              message: 'Allowed types: challenges, clubs, help, posts.',
             });
             return;
           }

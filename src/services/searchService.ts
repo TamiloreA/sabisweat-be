@@ -15,6 +15,7 @@ import type {
   SearchChallengeHostInfo,
   SearchClubItem,
   SearchHelpItem,
+  SearchPostItem,
   SearchResultGroup,
   SearchResourceType,
 } from '../models/searchModel';
@@ -25,6 +26,13 @@ const CHALLENGES_TABLE = 'challenges';
 const CLUBS_TABLE = 'clubs';
 const PARTICIPANTS_TABLE = 'challenge_participants';
 const CLUB_MEMBERS_TABLE = 'club_members';
+const POSTS_TABLE = 'posts';
+const COMMUNITY_POSTS_TABLE = 'community_posts';
+const LIKES_TABLE = 'community_likes';
+const COMMENTS_TABLE = 'community_comments';
+const PROFILES_TABLE = 'profiles';
+const POLL_OPTIONS_TABLE = 'community_poll_options';
+const POLL_VOTES_TABLE = 'community_poll_votes';
 
 const DEFAULT_FALLBACK_IMAGE =
   'https://images.unsplash.com/photo-1541534741688-6078c6bfb5c5?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80';
@@ -151,6 +159,109 @@ async function fetchChallengesAndClubsCatalog(): Promise<{
   } finally {
     if (useCache && challengesCatalogInFlight === loadPromise) {
       challengesCatalogInFlight = null;
+    }
+  }
+}
+
+interface SearchPostProfile {
+  id: string;
+  username?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  photo_url?: string | null;
+  photo_base64?: string | null;
+  avatar_id?: string | null;
+}
+
+let postsCatalogCache: {
+  expiresAt: number;
+  posts: any[];
+  profilesMap: Map<string, SearchPostProfile>;
+} | null = null;
+let postsCatalogInFlight: Promise<{
+  posts: any[];
+  profilesMap: Map<string, SearchPostProfile>;
+}> | null = null;
+
+async function fetchPostsAndAuthorsCatalog(): Promise<{
+  posts: any[];
+  profilesMap: Map<string, SearchPostProfile>;
+}> {
+  const useCache = process.env.NODE_ENV !== 'test';
+  const nowMs = Date.now();
+  if (useCache && postsCatalogCache && postsCatalogCache.expiresAt > nowMs) {
+    return {
+      posts: postsCatalogCache.posts,
+      profilesMap: postsCatalogCache.profilesMap,
+    };
+  }
+
+  if (useCache && postsCatalogInFlight) {
+    return postsCatalogInFlight;
+  }
+
+  const loadPromise = (async () => {
+    const postQuery: any = supabase
+      .from(POSTS_TABLE)
+      .select('id, title, description, tag, tags, images_url, author_id, user_id, club_id, shares_count, created_at')
+      .order('created_at', { ascending: false });
+
+    let postRes = typeof postQuery.limit === 'function' ? await postQuery.limit(300) : await postQuery;
+
+    if (postRes.error && postRes.error.code === 'PGRST205') {
+      const fallbackQuery: any = supabase
+        .from(COMMUNITY_POSTS_TABLE)
+        .select('id, title, description, tag, tags, images_url, author_id, club_id, shares_count, created_at')
+        .order('created_at', { ascending: false });
+      postRes = typeof fallbackQuery.limit === 'function' ? await fallbackQuery.limit(300) : await fallbackQuery;
+    }
+
+    if (postRes.error) {
+      throw postRes.error;
+    }
+
+    const posts = (postRes.data || []) as any[];
+    const authorIds = [
+      ...new Set(
+        posts
+          .map((p) => p.author_id || p.user_id)
+          .filter((id: unknown): id is string => typeof id === 'string' && id.trim().length > 0)
+      ),
+    ];
+
+    const profilesMap = new Map<string, SearchPostProfile>();
+    if (authorIds.length > 0) {
+      const profileQuery: any = supabase
+        .from(PROFILES_TABLE)
+        .select('id, username, first_name, last_name, photo_url, photo_base64, avatar_id');
+      if (typeof profileQuery.in === 'function') {
+        const { data: profiles } = await profileQuery.in('id', authorIds);
+        for (const p of profiles || []) {
+          if (p?.id) profilesMap.set(p.id, p);
+        }
+      }
+    }
+
+    if (useCache) {
+      postsCatalogCache = {
+        expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
+        posts,
+        profilesMap,
+      };
+    }
+
+    return { posts, profilesMap };
+  })();
+
+  if (useCache) {
+    postsCatalogInFlight = loadPromise;
+  }
+
+  try {
+    return await loadPromise;
+  } finally {
+    if (useCache && postsCatalogInFlight === loadPromise) {
+      postsCatalogInFlight = null;
     }
   }
 }
@@ -717,6 +828,202 @@ function scoreFaq(faq: FAQItem, query: string): ScoredItem<FAQItem> {
   return { item: faq, score, matched };
 }
 
+// ─── Post & Hashtag Scoring ─────────────────────────────────────
+
+function extractPostTagValues(post: any): {
+  storedTags: string[];
+  inlineHashtags: string[];
+} {
+  const storedRaw: string[] = [];
+  if (Array.isArray(post.tags) && post.tags.length > 0) {
+    for (const t of post.tags) {
+      const cleaned = String(t || '').replace(/^#+\s*/, '').trim();
+      if (cleaned) storedRaw.push(cleaned);
+    }
+  } else if (typeof post.tag === 'string' && post.tag.trim()) {
+    for (const t of post.tag.split(/[,;]/)) {
+      const cleaned = t.replace(/^#+\s*/, '').trim();
+      if (cleaned) storedRaw.push(cleaned);
+    }
+  }
+
+  const inlineHashtags: string[] = [];
+  const textToScan = `${post.title || ''} ${post.description || ''}`;
+  const hashtagMatches = textToScan.match(/#([a-zA-Z0-9_]+)/g);
+  if (hashtagMatches) {
+    for (const m of hashtagMatches) {
+      const cleaned = m.replace(/^#+/, '').trim();
+      if (cleaned) inlineHashtags.push(cleaned);
+    }
+  }
+
+  return { storedTags: storedRaw, inlineHashtags };
+}
+
+function scorePost(
+  post: any,
+  query: string,
+  authorProfile?: SearchPostProfile
+): ScoredItem<any> {
+  const trimmedQ = query.trim();
+  const isHashtagQuery = trimmedQ.startsWith('#');
+  const cleanQuery = trimmedQ.replace(/^#+\s*/, '').trim();
+  const normQ = normalizeText(cleanQuery);
+  const compactQ = normQ.replace(/\s+/g, '');
+  const qWords = extractWords(cleanQuery);
+
+  if (!normQ) {
+    return { item: post, score: 0, matched: false };
+  }
+
+  const { storedTags, inlineHashtags } = extractPostTagValues(post);
+  const allTagCandidates = [...storedTags, ...inlineHashtags];
+
+  const title = post.title || '';
+  const description = post.description || '';
+  const authorDisplay = [authorProfile?.first_name, authorProfile?.last_name]
+    .filter(Boolean)
+    .join(' ');
+  const authorUsername = authorProfile?.username || '';
+
+  const normTitle = normalizeText(title);
+  const normDesc = normalizeText(description);
+  const normAuthor = normalizeText(`${authorDisplay} ${authorUsername}`);
+
+  const titleWords = extractWords(title);
+  const descWords = extractWords(description);
+  const authorWords = extractWords(`${authorDisplay} ${authorUsername}`);
+
+  let score = 0;
+  let matched = false;
+
+  // 1. Hashtag / Tag Matching (highest boost when # prefix is used)
+  const tagWeightMultiplier = isHashtagQuery ? 1.6 : 1;
+  for (const rawTag of allTagCandidates) {
+    const normTag = normalizeText(rawTag);
+    const compactTag = normTag.replace(/\s+/g, '');
+    const tagWords = extractWords(rawTag);
+
+    if (normTag === normQ || (compactQ.length >= 2 && compactTag === compactQ)) {
+      score += Math.round(900 * tagWeightMultiplier);
+      matched = true;
+    } else if (
+      normTag.startsWith(normQ) ||
+      (compactQ.length >= 2 && compactTag.startsWith(compactQ))
+    ) {
+      score += Math.round(520 * tagWeightMultiplier);
+      matched = true;
+    } else if (tagWords.some((tw) => tw.startsWith(normQ))) {
+      score += Math.round(360 * tagWeightMultiplier);
+      matched = true;
+    } else if (
+      normTag.includes(normQ) ||
+      (compactQ.length >= 3 && compactTag.includes(compactQ))
+    ) {
+      score += Math.round(240 * tagWeightMultiplier);
+      matched = true;
+    } else if (qWords.length > 0 && qWords.every((qw) => tagWords.some((tw) => tw.includes(qw)))) {
+      score += Math.round(280 * tagWeightMultiplier);
+      matched = true;
+    } else if (compactQ.length >= 4) {
+      const simTag = Math.max(
+        trigramSimilarity(normTag, normQ),
+        trigramSimilarity(compactTag, compactQ)
+      );
+      if (simTag >= 0.4) {
+        score += Math.round(simTag * 180 * tagWeightMultiplier);
+        matched = true;
+      }
+    }
+  }
+
+  // If user specifically queried "#tag", only match posts with matching tags or inline #hashtags
+  if (!isHashtagQuery) {
+    // 2. Title & Description & Author matching
+    if (normTitle === normQ) {
+      score += 750;
+      matched = true;
+    } else if (normTitle.startsWith(normQ)) {
+      score += 450;
+      matched = true;
+    }
+
+    let matchedWords = 0;
+    for (const w of qWords) {
+      let wordHit = false;
+      if (titleWords.includes(w)) {
+        score += 140;
+        matched = true;
+        wordHit = true;
+      } else if (titleWords.some((tw) => tw.startsWith(w))) {
+        score += 95;
+        matched = true;
+        wordHit = true;
+      }
+
+      if (descWords.includes(w)) {
+        score += 65;
+        matched = true;
+        wordHit = true;
+      } else if (descWords.some((dw) => dw.startsWith(w))) {
+        score += 40;
+        matched = true;
+        wordHit = true;
+      }
+
+      if (authorWords.includes(w) || authorWords.some((aw) => aw.startsWith(w))) {
+        score += 80;
+        matched = true;
+        wordHit = true;
+      }
+
+      if (!wordHit && w.length >= 4) {
+        const candidates = [...titleWords, ...authorWords, ...descWords.slice(0, 20)];
+        let bestWordSim = 0;
+        for (const cw of candidates) {
+          if (cw.length < 4) continue;
+          const sim = trigramSimilarity(cw, w);
+          if (sim > bestWordSim) bestWordSim = sim;
+        }
+        if (bestWordSim >= 0.42) {
+          score += Math.round(bestWordSim * 75);
+          matched = true;
+          wordHit = true;
+        }
+      }
+
+      if (wordHit) matchedWords++;
+    }
+
+    if (qWords.length > 1 && matchedWords === qWords.length) {
+      score += 140;
+    }
+
+    if (normTitle.includes(normQ)) {
+      score += 110;
+      matched = true;
+    }
+    if (normDesc.includes(normQ)) {
+      score += 55;
+      matched = true;
+    }
+    if (normAuthor && normAuthor.includes(normQ)) {
+      score += 75;
+      matched = true;
+    }
+  }
+
+  // Recency tiebreaker
+  if (post.created_at) {
+    const timeMs = new Date(post.created_at).getTime();
+    if (!Number.isNaN(timeMs)) {
+      score += (timeMs / 1e12) * 0.02;
+    }
+  }
+
+  return { item: post, score, matched };
+}
+
 // ─── Parallel Participant and Member Count Fetchers ─────────────
 
 async function getChallengeParticipantCountsBatch(challengeIds: string[]): Promise<number[]> {
@@ -1074,6 +1381,166 @@ export async function search(params: SearchQueryParams): Promise<SearchResponse>
         }));
 
         results.help = {
+          total,
+          items,
+        };
+      })()
+    );
+  }
+
+  // Search Community Posts & Hashtags if requested
+  if (types.includes('posts')) {
+    searchTasks.push(
+      (async () => {
+        const userClubsPromise = userId
+          ? supabase.from(CLUB_MEMBERS_TABLE).select('club_id').eq('user_id', userId)
+          : Promise.resolve({ data: [] });
+
+        const [{ posts, profilesMap }, userClubsRes] = await Promise.all([
+          fetchPostsAndAuthorsCatalog(),
+          userClubsPromise,
+        ]);
+
+        const userClubIds = new Set<string>();
+        if (Array.isArray(userClubsRes?.data)) {
+          for (const row of userClubsRes.data as any[]) {
+            if (row?.club_id) userClubIds.add(row.club_id);
+          }
+        }
+
+        const eligible = posts.filter((post: any) => {
+          if (post.deleted_at != null) return false;
+          if (!post.club_id) return true; // Public community feed post
+          return Boolean(userId && userClubIds.has(post.club_id));
+        });
+
+        const scored = eligible
+          .map((post) => {
+            const authorId = post.author_id || post.user_id;
+            const authorProfile = authorId ? profilesMap.get(authorId) : undefined;
+            return scorePost(post, q, authorProfile);
+          })
+          .filter((s) => s.matched)
+          .sort((a, b) => b.score - a.score);
+
+        const total = scored.length;
+        const pageItems = scored.slice(offset, offset + limit).map((s) => s.item);
+        const pagePostIds = pageItems.map((p) => p.id);
+
+        // Fetch engagement counts + poll options ONLY for matched page items in parallel
+        const likeCounts = new Map<string, number>();
+        const likedPostIds = new Set<string>();
+        const commentCounts = new Map<string, number>();
+        const pollOptionsByPost = new Map<string, any[]>();
+
+        if (pagePostIds.length > 0) {
+          const likesQuery: any = supabase.from(LIKES_TABLE).select('post_id, user_id');
+          const commentsQuery: any = supabase.from(COMMENTS_TABLE).select('post_id');
+          const pollOptionsQuery: any = supabase.from(POLL_OPTIONS_TABLE).select('id, post_id, text, created_at');
+
+          const [likesRes, commentsRes, pollOptionsRes, userVotesRes] = await Promise.all([
+            typeof likesQuery.in === 'function' ? likesQuery.in('post_id', pagePostIds) : Promise.resolve({ data: [] }),
+            typeof commentsQuery.in === 'function' ? commentsQuery.in('post_id', pagePostIds) : Promise.resolve({ data: [] }),
+            typeof pollOptionsQuery.in === 'function' ? pollOptionsQuery.in('post_id', pagePostIds) : Promise.resolve({ data: [] }),
+            userId
+              ? supabase.from(POLL_VOTES_TABLE).select('option_id').eq('user_id', userId)
+              : Promise.resolve({ data: [] }),
+          ]);
+
+          for (const like of (likesRes?.data || []) as any[]) {
+            if (!like?.post_id) continue;
+            likeCounts.set(like.post_id, (likeCounts.get(like.post_id) || 0) + 1);
+            if (userId && like.user_id === userId) likedPostIds.add(like.post_id);
+          }
+
+          for (const comment of (commentsRes?.data || []) as any[]) {
+            if (!comment?.post_id) continue;
+            commentCounts.set(comment.post_id, (commentCounts.get(comment.post_id) || 0) + 1);
+          }
+
+          const rawPollOptions = (pollOptionsRes?.data || []) as any[];
+          if (rawPollOptions.length > 0) {
+            const optionIds = rawPollOptions.map((o) => o.id).filter(Boolean);
+            const voteCountsByOption = new Map<string, number>();
+            const myVotedOptionIds = new Set<string>(
+              ((userVotesRes?.data || []) as any[]).map((v) => v.option_id).filter(Boolean)
+            );
+
+            const votesQuery: any = supabase.from(POLL_VOTES_TABLE).select('option_id');
+            if (optionIds.length > 0 && typeof votesQuery.in === 'function') {
+              const { data: allVotes } = await votesQuery.in('option_id', optionIds);
+              for (const v of (allVotes || []) as any[]) {
+                if (v?.option_id) {
+                  voteCountsByOption.set(v.option_id, (voteCountsByOption.get(v.option_id) || 0) + 1);
+                }
+              }
+            }
+
+            const grouped = new Map<string, any[]>();
+            for (const opt of rawPollOptions) {
+              if (!opt?.post_id) continue;
+              const list = grouped.get(opt.post_id) || [];
+              list.push(opt);
+              grouped.set(opt.post_id, list);
+            }
+
+            for (const [pid, opts] of grouped.entries()) {
+              const totalVotes = opts.reduce((acc, o) => acc + (voteCountsByOption.get(o.id) || 0), 0);
+              pollOptionsByPost.set(
+                pid,
+                opts.map((o) => {
+                  const votesCount = voteCountsByOption.get(o.id) || 0;
+                  return {
+                    id: o.id,
+                    text: o.text,
+                    votesCount,
+                    percent: totalVotes > 0 ? Math.round((votesCount / totalVotes) * 100) : 0,
+                    votedByMe: myVotedOptionIds.has(o.id),
+                  };
+                })
+              );
+            }
+          }
+        }
+
+        const items: SearchPostItem[] = pageItems.map((post: any) => {
+          const authorId = post.author_id || post.user_id || '';
+          const authorProfile = authorId ? profilesMap.get(authorId) : undefined;
+          const displayName =
+            [authorProfile?.first_name, authorProfile?.last_name].filter(Boolean).join(' ') ||
+            undefined;
+
+          const { storedTags } = extractPostTagValues(post);
+          const pollOptions = pollOptionsByPost.get(post.id);
+
+          return {
+            id: post.id,
+            type: 'post',
+            title: post.title?.trim() || undefined,
+            description: post.description || '',
+            tag: storedTags[0] || undefined,
+            tags: storedTags.length > 0 ? storedTags : undefined,
+            imagesUrl: Array.isArray(post.images_url) ? post.images_url : [],
+            counts: {
+              likes: likeCounts.get(post.id) ?? 0,
+              comments: commentCounts.get(post.id) ?? 0,
+              shares: post.shares_count ?? 0,
+            },
+            likedByMe: userId ? likedPostIds.has(post.id) : false,
+            author: {
+              id: authorId,
+              username: authorProfile?.username ?? undefined,
+              displayName,
+              photoUrl: authorProfile?.photo_url || authorProfile?.photo_base64 || undefined,
+              avatarId: authorProfile?.avatar_id ?? undefined,
+            },
+            clubId: post.club_id ?? null,
+            createdAt: post.created_at,
+            ...(pollOptions ? { pollOptions } : {}),
+          };
+        });
+
+        results.posts = {
           total,
           items,
         };

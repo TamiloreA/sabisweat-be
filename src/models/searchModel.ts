@@ -4,7 +4,7 @@
  * Types and interfaces for the unified search filter engine across Challenges and Clubs.
  */
 
-export type SearchResourceType = 'challenges' | 'clubs' | 'help';
+export type SearchResourceType = 'challenges' | 'clubs' | 'help' | 'posts';
 
 export interface SearchQueryParams {
   q: string;
@@ -63,6 +63,38 @@ export interface SearchHelpItem {
   url?: string;
 }
 
+export interface SearchPostItem {
+  id: string;
+  type: 'post';
+  title?: string;
+  description: string;
+  tag?: string;
+  tags?: string[];
+  imagesUrl: string[];
+  counts: {
+    likes: number;
+    comments: number;
+    shares: number;
+  };
+  likedByMe: boolean;
+  author: {
+    id: string;
+    username?: string;
+    displayName?: string;
+    photoUrl?: string;
+    avatarId?: string;
+  };
+  clubId?: string | null;
+  createdAt: string;
+  pollOptions?: Array<{
+    id: string;
+    text: string;
+    votesCount: number;
+    percent: number;
+    votedByMe: boolean;
+  }>;
+}
+
 export interface SearchResultGroup<T> {
   total: number;
   items: T[];
@@ -72,6 +104,7 @@ export interface SearchResults {
   challenges?: SearchResultGroup<SearchChallengeItem>;
   clubs?: SearchResultGroup<SearchClubItem>;
   help?: SearchResultGroup<SearchHelpItem>;
+  posts?: SearchResultGroup<SearchPostItem>;
 }
 
 export interface SearchMeta {
