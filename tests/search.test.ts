@@ -49,9 +49,39 @@ jest.mock('../src/config/database', () => {
       start_at: new Date().toISOString(),
       end_at: new Date(Date.now() + 86400000).toISOString(),
       created_at: new Date().toISOString(),
-      who_can_join: 'club_members', // should be excluded
+      who_can_join: 'club_members', // should be excluded for non-members
       leaderboard_visibility: 'private',
       is_public: false,
+    },
+    {
+      id: 'c4_cohosted',
+      title: 'Sunrise 21-Day Streak',
+      subtitle: 'Joint city step sprint',
+      description: 'Stay consistent for 21 days',
+      host_club_id: 'club8_moving_boyz',
+      co_host_club_id: 'club1_ng_lagos',
+      start_at: new Date(Date.now() - 86400000).toISOString(),
+      end_at: new Date(Date.now() + 86400000 * 14).toISOString(),
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+      who_can_join: 'everyone',
+      leaderboard_visibility: 'public',
+      is_public: true,
+      hero_image_url: 'https://example.com/c4.jpg',
+      max_participants: 300,
+    },
+    {
+      id: 'c5_club_only',
+      title: 'Moving Boyz Members Only Cup',
+      subtitle: 'Exclusive squad challenge',
+      description: 'Members cup',
+      host_club_id: 'club8_moving_boyz',
+      start_at: new Date(Date.now() - 86400000).toISOString(),
+      end_at: new Date(Date.now() + 86400000 * 10).toISOString(),
+      created_at: new Date().toISOString(),
+      who_can_join: 'club_members',
+      leaderboard_visibility: 'public',
+      hero_image_url: 'https://example.com/c5.jpg',
+      max_participants: 80,
     },
   ];
 
@@ -143,6 +173,19 @@ jest.mock('../src/config/database', () => {
       members_count: 1000,
       created_at: new Date(Date.now() - 86400000 * 15).toISOString(),
     },
+    {
+      id: 'club8_moving_boyz',
+      name: 'Moving Boyz',
+      tag: 'moving_boyz',
+      description: 'Lagos morning walkers',
+      location_text: 'Lagos',
+      status: 'approved',
+      visible: true,
+      theme: 'orange',
+      profile_image_url: 'https://example.com/moving_boyz.jpg',
+      members_count: 90,
+      created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+    },
   ];
 
     const mockFaqs = [
@@ -226,7 +269,15 @@ jest.mock('../src/config/database', () => {
           if (table === 'club_members') {
             return {
               select: jest.fn().mockReturnThis(),
-              eq: jest.fn().mockResolvedValue({ count: 250, error: null }),
+              eq: jest.fn((field: string, val: any) => {
+                if (field === 'user_id') {
+                  const rows = val === 'member_moving_boyz'
+                    ? [{ club_id: 'club8_moving_boyz' }]
+                    : [];
+                  return Promise.resolve({ data: rows, error: null });
+                }
+                return Promise.resolve({ count: 250, error: null });
+              }),
             };
           }
           return {
@@ -417,6 +468,52 @@ describe('Search Filter Engine - Unit Tests', () => {
       expect(item?.endDate).toBeDefined();
       expect(typeof item?.participantCount).toBe('number');
       expect(item?.status).toBe('active');
+    });
+
+    it('matches challenges by host club name, co-host club name, and multi-word fuzzy query, and includes host/coHost', async () => {
+      // Search "moving boys" (typo for "Moving Boyz" host club of c4_cohosted)
+      const byHostRes = await search({
+        q: 'moving boys',
+        types: ['challenges'],
+        limit: 10,
+        offset: 0,
+      });
+
+      const hostItems = byHostRes.results.challenges?.items || [];
+      expect(hostItems.some((c) => c.id === 'c4_cohosted')).toBe(true);
+      const matched = hostItems.find((c) => c.id === 'c4_cohosted');
+      expect(matched?.host?.name).toBe('Moving Boyz');
+      expect(matched?.coHost?.name).toBe('Eko Runners Club');
+      expect(matched?.coHosts?.[0]?.name).toBe('Eko Runners Club');
+
+      // Search by co-host club name
+      const byCoHostRes = await search({
+        q: 'Eko Runners',
+        types: ['challenges'],
+        limit: 10,
+        offset: 0,
+      });
+      expect(byCoHostRes.results.challenges?.items.some((c) => c.id === 'c4_cohosted')).toBe(true);
+    });
+
+    it('shows club_members challenges in search only to members of the host/co-host club', async () => {
+      const nonMemberRes = await search({
+        q: 'Moving Boyz Members Only Cup',
+        types: ['challenges'],
+        limit: 10,
+        offset: 0,
+        userId: 'random_non_member',
+      });
+      expect(nonMemberRes.results.challenges?.items.some((c) => c.id === 'c5_club_only')).toBe(false);
+
+      const memberRes = await search({
+        q: 'Moving Boyz Members Only Cup',
+        types: ['challenges'],
+        limit: 10,
+        offset: 0,
+        userId: 'member_moving_boyz',
+      });
+      expect(memberRes.results.challenges?.items.some((c) => c.id === 'c5_club_only')).toBe(true);
     });
 
     it('maps Club item fields according to contract', async () => {

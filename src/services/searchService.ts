@@ -12,6 +12,7 @@ import type {
   SearchResponse,
   SearchResults,
   SearchChallengeItem,
+  SearchChallengeHostInfo,
   SearchClubItem,
   SearchHelpItem,
   SearchResultGroup,
@@ -27,6 +28,132 @@ const CLUB_MEMBERS_TABLE = 'club_members';
 
 const DEFAULT_FALLBACK_IMAGE =
   'https://images.unsplash.com/photo-1541534741688-6078c6bfb5c5?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80';
+
+// Short-lived in-memory cache so rapid typing keystrokes don't re-scan Supabase every 200ms
+const SEARCH_CACHE_TTL_MS = 20_000;
+let challengesCatalogCache: {
+  expiresAt: number;
+  challenges: any[];
+  clubsMap: Map<string, { id: string; name: string; profile_image_url?: string | null; theme?: string | null }>;
+} | null = null;
+let challengesCatalogInFlight: Promise<{
+  challenges: any[];
+  clubsMap: Map<string, { id: string; name: string; profile_image_url?: string | null; theme?: string | null }>;
+}> | null = null;
+
+async function fetchChallengesAndClubsCatalog(): Promise<{
+  challenges: any[];
+  clubsMap: Map<string, { id: string; name: string; profile_image_url?: string | null; theme?: string | null }>;
+}> {
+  const useCache = process.env.NODE_ENV !== 'test';
+  const nowMs = Date.now();
+  if (useCache && challengesCatalogCache && challengesCatalogCache.expiresAt > nowMs) {
+    return {
+      challenges: challengesCatalogCache.challenges,
+      clubsMap: challengesCatalogCache.clubsMap,
+    };
+  }
+
+  if (useCache && challengesCatalogInFlight) {
+    return challengesCatalogInFlight;
+  }
+
+  const loadPromise = (async () => {
+    const nowIso = new Date().toISOString();
+    const baseChallengeColumns = [
+      'id',
+      'title',
+      'subtitle',
+      'description',
+      'hero_image_url',
+      'challenge_image',
+      'host_name',
+      'host_logo_url',
+      'host_club_id',
+      'start_at',
+      'end_at',
+      'created_at',
+      'created_by',
+      'who_can_join',
+      'leaderboard_visibility',
+      'max_participants',
+      'country',
+      'region',
+      'city_tag',
+    ];
+    const extendedChallengeColumns = [
+      ...baseChallengeColumns,
+      'co_host_club_id',
+      'is_official',
+    ];
+
+    const runChallengeQuery = async (cols: string[]) =>
+      supabase
+        .from(CHALLENGES_TABLE)
+        .select(cols.join(', '))
+        .gte('end_at', nowIso)
+        .order('created_at', { ascending: false });
+
+    // Fetch challenges and lightweight clubs list in parallel (1 network hop)
+    const clubQuery: any = supabase
+      .from(CLUBS_TABLE)
+      .select('id, name, profile_image_url, theme');
+
+    const clubsFetchPromise =
+      typeof clubQuery.order === 'function'
+        ? clubQuery.order('created_at', { ascending: false })
+        : clubQuery;
+
+    const [initialChallengeRes, clubsRes] = await Promise.all([
+      runChallengeQuery(extendedChallengeColumns),
+      clubsFetchPromise,
+    ]);
+
+    let challengeRes = initialChallengeRes;
+    if (
+      challengeRes.error &&
+      (challengeRes.error.message?.includes('co_host_club_id') ||
+        challengeRes.error.message?.includes('is_official'))
+    ) {
+      challengeRes = await runChallengeQuery(baseChallengeColumns);
+    }
+
+    if (challengeRes.error) {
+      throw challengeRes.error;
+    }
+
+    const challenges = (challengeRes.data || []) as any[];
+    const clubsMap = new Map<
+      string,
+      { id: string; name: string; profile_image_url?: string | null; theme?: string | null }
+    >();
+    for (const club of (clubsRes?.data || []) as any[]) {
+      if (club?.id) clubsMap.set(club.id, club);
+    }
+
+    if (useCache) {
+      challengesCatalogCache = {
+        expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
+        challenges,
+        clubsMap,
+      };
+    }
+
+    return { challenges, clubsMap };
+  })();
+
+  if (useCache) {
+    challengesCatalogInFlight = loadPromise;
+  }
+
+  try {
+    return await loadPromise;
+  } finally {
+    if (useCache && challengesCatalogInFlight === loadPromise) {
+      challengesCatalogInFlight = null;
+    }
+  }
+}
 
 // ─── Text & Trigram Utilities ───────────────────────────────────
 
@@ -114,37 +241,67 @@ interface ScoredItem<T> {
   matched: boolean;
 }
 
-function scoreChallenge(challenge: any, query: string): ScoredItem<any> {
+function scoreChallenge(
+  challenge: any,
+  query: string,
+  hostClubName?: string,
+  coHostClubName?: string
+): ScoredItem<any> {
   const normQ = normalizeText(query);
   const qWords = extractWords(query);
 
   const title = challenge.title || '';
   const subtitle = challenge.subtitle || '';
   const description = challenge.description || '';
+  const resolvedHostName = hostClubName || challenge.host_name || '';
+  const resolvedCoHostName = coHostClubName || '';
+  const locationText = [challenge.city_tag, challenge.region, challenge.country]
+    .filter(Boolean)
+    .join(' ');
 
   const normTitle = normalizeText(title);
   const normSubtitle = normalizeText(subtitle);
   const normDesc = normalizeText(description);
+  const normHost = normalizeText(resolvedHostName);
+  const normCoHost = normalizeText(resolvedCoHostName);
+  const normLocation = normalizeText(locationText);
 
   const titleWords = extractWords(title);
   const subtitleWords = extractWords(subtitle);
   const descWords = extractWords(description);
+  const hostWords = extractWords(resolvedHostName);
+  const coHostWords = extractWords(resolvedCoHostName);
+  const allHostWords = [...hostWords, ...coHostWords];
 
   let score = 0;
   let matched = false;
 
-  // 1. Exact match on title (highest priority)
+  // 1. Exact match on title or host club name (highest priority)
   if (normTitle === normQ) {
     score += 1000;
     matched = true;
+  } else if ((normHost && normHost === normQ) || (normCoHost && normCoHost === normQ)) {
+    score += 550;
+    matched = true;
   }
 
-  // 2. Prefix match on title
+  // 2. Prefix match on title or host
   if (normTitle.startsWith(normQ)) {
     score += 600;
     matched = true;
   } else if (titleWords.some((w) => w.startsWith(normQ))) {
     score += 400;
+    matched = true;
+  }
+
+  if (normHost && normHost.startsWith(normQ)) {
+    score += 320;
+    matched = true;
+  } else if (normCoHost && normCoHost.startsWith(normQ)) {
+    score += 280;
+    matched = true;
+  } else if (allHostWords.some((w) => w.startsWith(normQ))) {
+    score += 220;
     matched = true;
   }
 
@@ -157,33 +314,84 @@ function scoreChallenge(challenge: any, query: string): ScoredItem<any> {
     matched = true;
   }
 
-  // 3. Full-text / Word matching (weighted: title > subtitle > description)
+  // 3. Full-text / Word matching (weighted: title > host/co-host > subtitle > description)
+  let matchedQueryWordCount = 0;
   for (const w of qWords) {
+    let wordMatched = false;
+
     if (titleWords.includes(w)) {
       score += 150;
       matched = true;
+      wordMatched = true;
     } else if (titleWords.some((tw) => tw.startsWith(w))) {
       score += 100;
       matched = true;
+      wordMatched = true;
+    }
+
+    if (allHostWords.includes(w)) {
+      score += 110;
+      matched = true;
+      wordMatched = true;
+    } else if (allHostWords.some((hw) => hw.startsWith(w))) {
+      score += 75;
+      matched = true;
+      wordMatched = true;
     }
 
     if (subtitleWords.includes(w)) {
       score += 80;
       matched = true;
+      wordMatched = true;
     } else if (subtitleWords.some((sw) => sw.startsWith(w))) {
       score += 50;
       matched = true;
+      wordMatched = true;
     }
 
     if (descWords.includes(w)) {
       score += 40;
       matched = true;
+      wordMatched = true;
     }
+
+    // Per-word fuzzy match (e.g., "moving boys" -> "Moving Boyz")
+    if (!wordMatched && w.length >= 4) {
+      const candidateWords = [...titleWords, ...allHostWords, ...subtitleWords];
+      let bestWordSim = 0;
+      for (const cw of candidateWords) {
+        if (cw.length < 4) continue;
+        const sim = trigramSimilarity(cw, w);
+        if (sim > bestWordSim) bestWordSim = sim;
+      }
+      if (bestWordSim >= 0.4) {
+        score += Math.round(bestWordSim * 90);
+        matched = true;
+        wordMatched = true;
+      }
+    }
+
+    if (wordMatched) {
+      matchedQueryWordCount++;
+    }
+  }
+
+  // Bonus when every word in a multi-word query matches
+  if (qWords.length > 1 && matchedQueryWordCount === qWords.length) {
+    score += 180;
   }
 
   // Substring matching
   if (normTitle.includes(normQ)) {
     score += 120;
+    matched = true;
+  }
+  if (normHost && normHost.includes(normQ)) {
+    score += 95;
+    matched = true;
+  }
+  if (normCoHost && normCoHost.includes(normQ)) {
+    score += 85;
     matched = true;
   }
   if (normSubtitle.includes(normQ)) {
@@ -194,15 +402,22 @@ function scoreChallenge(challenge: any, query: string): ScoredItem<any> {
     score += 30;
     matched = true;
   }
+  if (normLocation && normLocation.includes(normQ)) {
+    score += 25;
+    matched = true;
+  }
 
   // 4. Fuzzy matching (Trigram similarity) for queries >= 4 chars
   // Tolerate 1-2 typos (similarity >= 0.28)
   if (normQ.length >= 4) {
     const simTitle = trigramSimilarity(normTitle, normQ);
-    const maxWordSim = titleWords.length
-      ? Math.max(...titleWords.map((w) => trigramSimilarity(w, normQ)))
+    const simHost = normHost ? trigramSimilarity(normHost, normQ) : 0;
+    const simCoHost = normCoHost ? trigramSimilarity(normCoHost, normQ) : 0;
+    const candidateWords = [...titleWords, ...allHostWords];
+    const maxWordSim = candidateWords.length
+      ? Math.max(...candidateWords.map((w) => trigramSimilarity(w, normQ)))
       : 0;
-    const bestSim = Math.max(simTitle, maxWordSim);
+    const bestSim = Math.max(simTitle, simHost, simCoHost, maxWordSim);
 
     if (bestSim >= 0.28) {
       score += Math.round(bestSim * 80);
@@ -504,6 +719,29 @@ function scoreFaq(faq: FAQItem, query: string): ScoredItem<FAQItem> {
 
 // ─── Parallel Participant and Member Count Fetchers ─────────────
 
+async function getChallengeParticipantCountsBatch(challengeIds: string[]): Promise<number[]> {
+  if (challengeIds.length === 0) return [];
+
+  const q: any = supabase
+    .from(PARTICIPANTS_TABLE)
+    .select('challenge_id');
+
+  if (typeof q.in === 'function') {
+    const { data, error } = await q.in('challenge_id', challengeIds).is('left_at', null);
+    if (!error && Array.isArray(data)) {
+      const countsMap = new Map<string, number>();
+      for (const row of data as any[]) {
+        if (row?.challenge_id) {
+          countsMap.set(row.challenge_id, (countsMap.get(row.challenge_id) || 0) + 1);
+        }
+      }
+      return challengeIds.map((id) => countsMap.get(id) || 0);
+    }
+  }
+
+  return Promise.all(challengeIds.map((id) => getChallengeParticipantCount(id)));
+}
+
 async function getChallengeParticipantCount(challengeId: string): Promise<number> {
   const { count, error } = await supabase
     .from(PARTICIPANTS_TABLE)
@@ -513,6 +751,29 @@ async function getChallengeParticipantCount(challengeId: string): Promise<number
 
   if (error) return 0;
   return count ?? 0;
+}
+
+async function getClubMemberCountsBatch(clubs: any[]): Promise<number[]> {
+  if (clubs.length === 0) return [];
+  const clubIds = clubs.map((c) => c.id);
+  const q: any = supabase.from(CLUB_MEMBERS_TABLE).select('club_id');
+
+  if (typeof q.in === 'function') {
+    const { data, error } = await q.in('club_id', clubIds);
+    if (!error && Array.isArray(data)) {
+      const countsMap = new Map<string, number>();
+      for (const row of data as any[]) {
+        if (row?.club_id) {
+          countsMap.set(row.club_id, (countsMap.get(row.club_id) || 0) + 1);
+        }
+      }
+      return clubs.map((c) => countsMap.get(c.id) ?? c.members_count ?? 0);
+    }
+  }
+
+  return Promise.all(
+    clubs.map((club) => getClubMemberCount(club.id, club.members_count || 0))
+  );
 }
 
 async function getClubMemberCount(clubId: string, fallbackCount: number = 0): Promise<number> {
@@ -541,44 +802,109 @@ export async function search(params: SearchQueryParams): Promise<SearchResponse>
       (async () => {
         const nowIso = new Date().toISOString();
 
-        // Query eligible challenges: not ended, public visibility
-        let query = supabase
-          .from(CHALLENGES_TABLE)
-          .select('*')
-          .gte('end_at', nowIso)
-          .order('created_at', { ascending: false });
+        // Fetch cached/parallel challenges + clubs catalog AND user memberships concurrently
+        const userAccessPromise = userId
+          ? Promise.all([
+              supabase.from(CLUB_MEMBERS_TABLE).select('club_id').eq('user_id', userId),
+              supabase
+                .from(PARTICIPANTS_TABLE)
+                .select('challenge_id')
+                .eq('user_id', userId)
+                .is('left_at', null),
+            ])
+          : Promise.resolve(null);
 
-        const { data: challenges, error } = await query;
-        if (error) {
-          throw error;
+        const [{ challenges, clubsMap }, userAccessRes] = await Promise.all([
+          fetchChallengesAndClubsCatalog(),
+          userAccessPromise,
+        ]);
+
+        const userClubIds = new Set<string>();
+        const userJoinedChallengeIds = new Set<string>();
+        if (userAccessRes) {
+          const [membershipsRes, participationsRes] = userAccessRes;
+          if (Array.isArray(membershipsRes?.data)) {
+            for (const row of membershipsRes.data as any[]) {
+              if (row?.club_id) userClubIds.add(row.club_id);
+            }
+          }
+          if (Array.isArray(participationsRes?.data)) {
+            for (const row of participationsRes.data as any[]) {
+              if (row?.challenge_id) userJoinedChallengeIds.add(row.challenge_id);
+            }
+          }
         }
 
-        const eligible = (challenges || []).filter((c: any) => {
-          // Exclude soft-deleted
+        const eligible = challenges.filter((c: any) => {
+          // Exclude expired, soft-deleted, or explicitly non-public/invite-only challenges
+          if (c.end_at && new Date(c.end_at).getTime() < Date.now()) return false;
           if (c.deleted_at != null) return false;
-          // Exclude private / invite-only challenges
-          if (c.who_can_join === 'club_members' || c.leaderboard_visibility === 'private') {
-            return false;
-          }
           if (c.is_public === false || c.visibility === 'invite_only') {
             return false;
           }
+
+          if (c.who_can_join === 'club_members') {
+            if (!userId) return false;
+            const isCreator = c.created_by === userId;
+            const isJoined = userJoinedChallengeIds.has(c.id);
+            const isHostMember = Boolean(c.host_club_id && userClubIds.has(c.host_club_id));
+            const isCoHostMember = Boolean(c.co_host_club_id && userClubIds.has(c.co_host_club_id));
+            if (!isCreator && !isJoined && !isHostMember && !isCoHostMember) {
+              return false;
+            }
+          }
+
+          if (c.leaderboard_visibility === 'private') {
+            if (!userId) return false;
+            const isCreator = c.created_by === userId;
+            const isJoined = userJoinedChallengeIds.has(c.id);
+            if (!isCreator && !isJoined) {
+              return false;
+            }
+          }
+
           return true;
         });
 
-        // Score and filter matching challenges
+        // Score and filter matching challenges (including host & co-host club names)
         const scored = eligible
-          .map((c) => scoreChallenge(c, q))
+          .map((c) => {
+            const hostClub = c.host_club_id ? clubsMap.get(c.host_club_id) : undefined;
+            const coHostClub = c.co_host_club_id ? clubsMap.get(c.co_host_club_id) : undefined;
+            return scoreChallenge(c, q, hostClub?.name, coHostClub?.name);
+          })
           .filter((s) => s.matched)
           .sort((a, b) => b.score - a.score);
 
         const total = scored.length;
         const pageItems = scored.slice(offset, offset + limit).map((s) => s.item);
 
-        // Fetch participant counts for page items in parallel
-        const participantCounts = await Promise.all(
-          pageItems.map((c) => getChallengeParticipantCount(c.id))
-        );
+        // Fetch base64 fallback images (if needed) and participant counts in 1 parallel batch
+        const idsNeedingBase64 = pageItems
+          .filter((c: any) => !c.hero_image_base64 && !c.hero_image_url && !c.challenge_image)
+          .map((c: any) => c.id);
+
+        const base64Promise = (async () => {
+          const map = new Map<string, string>();
+          if (idsNeedingBase64.length === 0) return map;
+          const base64Query: any = supabase
+            .from(CHALLENGES_TABLE)
+            .select('id, hero_image_base64');
+          if (typeof base64Query.in === 'function') {
+            const { data: base64Rows } = await base64Query.in('id', idsNeedingBase64);
+            for (const row of base64Rows || []) {
+              if (row?.id && row?.hero_image_base64) {
+                map.set(row.id, row.hero_image_base64);
+              }
+            }
+          }
+          return map;
+        })();
+
+        const [base64Map, participantCounts] = await Promise.all([
+          base64Promise,
+          getChallengeParticipantCountsBatch(pageItems.map((c) => c.id)),
+        ]);
 
         const now = new Date();
         const items: SearchChallengeItem[] = pageItems.map((c, idx) => {
@@ -594,10 +920,33 @@ export async function search(params: SearchQueryParams): Promise<SearchResponse>
             status = 'completed';
           }
 
+          const resolvedBase64 = c.hero_image_base64 || base64Map.get(c.id);
           const imageUrl =
-            c.hero_image_base64 || c.hero_image_url || c.challenge_image || '';
+            resolvedBase64 || c.hero_image_url || c.challenge_image || '';
           const fallbackImageUrl =
             c.hero_image_url || c.challenge_image || DEFAULT_FALLBACK_IMAGE;
+
+          const hostClub = c.host_club_id ? clubsMap.get(c.host_club_id) : undefined;
+          const coHostClub = c.co_host_club_id ? clubsMap.get(c.co_host_club_id) : undefined;
+
+          const host: SearchChallengeHostInfo | undefined =
+            hostClub || c.host_name || c.host_club_id
+              ? {
+                  name: hostClub?.name || c.host_name || '',
+                  logoUrl: hostClub?.profile_image_url ?? c.host_logo_url ?? undefined,
+                  clubId: hostClub?.id ?? c.host_club_id ?? undefined,
+                  theme: hostClub?.theme || (c.is_official ? 'green' : undefined),
+                }
+              : undefined;
+
+          const coHost: SearchChallengeHostInfo | undefined = coHostClub
+            ? {
+                name: coHostClub.name,
+                logoUrl: coHostClub.profile_image_url ?? undefined,
+                clubId: coHostClub.id,
+                theme: coHostClub.theme || undefined,
+              }
+            : undefined;
 
           return {
             id: c.id,
@@ -611,6 +960,8 @@ export async function search(params: SearchQueryParams): Promise<SearchResponse>
             participantCount: participantCounts[idx],
             status,
             isOfficial: Boolean(c.is_official),
+            ...(host ? { host } : {}),
+            ...(coHost ? { coHost, coHosts: [coHost] } : {}),
           };
         });
 
@@ -663,10 +1014,8 @@ export async function search(params: SearchQueryParams): Promise<SearchResponse>
         const total = scored.length;
         const pageItems = scored.slice(offset, offset + limit).map((s) => s.item);
 
-        // Fetch exact member counts in parallel
-        const memberCounts = await Promise.all(
-          pageItems.map((club) => getClubMemberCount(club.id, club.members_count || 0))
-        );
+        // Fetch exact member counts in 1 batched query
+        const memberCounts = await getClubMemberCountsBatch(pageItems);
 
         const items: SearchClubItem[] = pageItems.map((club, idx) => {
           const badgeUrl =

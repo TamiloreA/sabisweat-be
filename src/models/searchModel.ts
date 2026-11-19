@@ -17,6 +17,13 @@ export interface SearchQueryParams {
   userId?: string;
 }
 
+export interface SearchChallengeHostInfo {
+  name?: string;
+  logoUrl?: string | null;
+  clubId?: string;
+  theme?: string;
+}
+
 export interface SearchChallengeItem {
   id: string;
   type: 'challenge';
@@ -29,6 +36,9 @@ export interface SearchChallengeItem {
   participantCount: number;
   status: string;
   isOfficial?: boolean;
+  host?: SearchChallengeHostInfo;
+  coHost?: SearchChallengeHostInfo;
+  coHosts?: SearchChallengeHostInfo[];
 }
 
 export interface SearchClubItem {
