@@ -36,6 +36,8 @@ import {
   handlePostCommentEvent,
 } from './notificationEventService';
 import { getGeoPriority } from '../utils/geoHierarchy';
+import { uploadBase64Image } from '../utils/imageUpload';
+import { resolveAvatarIdToUrl, SUPABASE_MEDIA_URL } from '../utils/avatarResolver';
 
 const POSTS_TABLE = 'posts';
 const LIKES_TABLE = 'community_likes';
@@ -2121,15 +2123,82 @@ function formatDateInTimezone(dateInput: string | Date, timezone: string = 'Afri
   }
 }
 
+function resolveHttpPhotoUrl(raw?: string | null): string | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return undefined;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith('/storage/')) {
+    return `${SUPABASE_MEDIA_URL.replace(/\/+$/, '')}${trimmed}`;
+  }
+  if (!trimmed.startsWith('data:') && /\.(png|jpe?g|webp|gif)(\?.*)?$/i.test(trimmed)) {
+    const cleanPath = trimmed.replace(/^\/+/, '');
+    const { data } = supabase.storage.from(IMAGES_BUCKET).getPublicUrl(cleanPath);
+    if (data?.publicUrl) return data.publicUrl;
+  }
+  return undefined;
+}
+
+async function resolveLeaderboardProfilePhotos(profileMap: Map<string, ProfileRow>): Promise<void> {
+  await Promise.all(
+    Array.from(profileMap.values()).map(async (profile) => {
+      // 1. Existing HTTP or relative Storage URL
+      const existingHttpUrl =
+        resolveHttpPhotoUrl(profile.photo_url) ?? resolveHttpPhotoUrl(profile.photo_base64);
+      if (existingHttpUrl) {
+        profile.photo_url = existingHttpUrl;
+        return;
+      }
+
+      // 2. Migrate legacy base64 photo (from photo_base64 or photo_url) to Storage
+      const rawBase64 =
+        (profile.photo_url && !resolveHttpPhotoUrl(profile.photo_url) ? profile.photo_url : null) ||
+        profile.photo_base64;
+
+      if (rawBase64) {
+        try {
+          const uploadedUrl = await uploadBase64Image(`avatars/${profile.id}`, rawBase64);
+          if (uploadedUrl) {
+            profile.photo_url = uploadedUrl;
+            try {
+              await supabase
+                .from(PROFILES_TABLE)
+                .update({ photo_url: uploadedUrl })
+                .eq('id', profile.id);
+            } catch (err) {
+              console.warn('[clubLeaderboard] Failed to persist migrated photo_url:', err);
+            }
+            return;
+          }
+        } catch (err) {
+          console.warn('[clubLeaderboard] Base64 photo upload failed:', err);
+        }
+      }
+
+      // 3. Fall back to predefined avatar Storage URL in avatar2 bucket
+      const avatarStorageUrl = resolveAvatarIdToUrl(profile.avatar_id);
+      if (avatarStorageUrl) {
+        profile.photo_url = avatarStorageUrl;
+      }
+    })
+  );
+}
+
 function mapLeaderboardUser(profile: ProfileRow | undefined, userId: string) {
   const displayName = profile
     ? [profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.username || 'Member'
     : 'Member';
+  const resolvedPhotoUrl =
+    resolveHttpPhotoUrl(profile?.photo_url) ??
+    resolveAvatarIdToUrl(profile?.avatar_id) ??
+    profile?.photo_url ??
+    profile?.photo_base64 ??
+    undefined;
   return {
     id: userId,
     username: profile?.username || undefined,
     displayName,
-    photoUrl: profile?.photo_url || profile?.photo_base64 || undefined,
+    photoUrl: resolvedPhotoUrl,
     avatarId: profile?.avatar_id || undefined,
   };
 }
@@ -2322,6 +2391,7 @@ export async function getClubLeaderboard(
   }
 
   const profileMap = await fetchProfilesMap(profileIdsToFetch);
+  await resolveLeaderboardProfilePhotos(profileMap);
 
   let currentUser: ClubLeaderboardEntry | null = null;
   if (currentUserId && memberIds.includes(currentUserId)) {
