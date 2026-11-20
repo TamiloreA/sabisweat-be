@@ -103,6 +103,19 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+export const deleteComment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await communityService.deleteComment(
+      req.params.id,
+      req.params.commentId,
+      req.user!.id
+    );
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getPostById = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const post = await communityService.getPostById(req.params.id, req.user?.sub);

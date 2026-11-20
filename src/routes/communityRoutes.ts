@@ -6,6 +6,7 @@ import {
   unlikePost,
   addComment,
   getComments,
+  deleteComment,
   getPostById,
   createClub,
   getClubs,
@@ -247,6 +248,35 @@ router.post('/posts/:id/comments', requireAuth, addComment);
  *         description: List of top-level comments, each with a children array
  */
 router.get('/posts/:id/comments', requireAuth, getComments);
+
+/**
+ * @openapi
+ * /community/posts/{id}/comments/{commentId}:
+ *   delete:
+ *     summary: Delete a comment (author, post owner, or club admin)
+ *     tags: [Community]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: commentId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Comment deleted
+ *       403:
+ *         description: Not authorized to delete this comment
+ *       404:
+ *         description: Comment not found
+ */
+router.delete('/posts/:id/comments/:commentId', requireAuth, deleteComment);
 
 /**
  * @openapi

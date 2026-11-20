@@ -848,6 +848,108 @@ export async function getComments(postId: string): Promise<PostComment[]> {
   return roots.reverse();
 }
 
+async function fetchPostMetaForModeration(
+  postId: string
+): Promise<{ id: string; author_id: string | null; club_id: string | null } | null> {
+  let { data: post, error } = await supabase
+    .from(POSTS_TABLE)
+    .select('id, author_id, club_id')
+    .eq('id', postId)
+    .maybeSingle();
+
+  if (error && error.code === 'PGRST205') {
+    const fb = await supabase
+      .from('community_posts')
+      .select('id, author_id, club_id')
+      .eq('id', postId)
+      .maybeSingle();
+    post = fb.data;
+    error = fb.error;
+  }
+
+  if (error) throw error;
+  return post ?? null;
+}
+
+export async function deleteComment(
+  postId: string,
+  commentId: string,
+  userId: string
+): Promise<{ id: string; deleted: true }> {
+  // Fast path: 1 round-trip atomic delete when the requester owns the comment.
+  // Nested replies cascade automatically via ON DELETE CASCADE on parent_id.
+  const { data: ownDeleted, error: ownDeleteError } = await supabase
+    .from(COMMENTS_TABLE)
+    .delete()
+    .eq('id', commentId)
+    .eq('post_id', postId)
+    .eq('user_id', userId)
+    .select('id');
+
+  if (ownDeleteError) throw ownDeleteError;
+  if (ownDeleted && ownDeleted.length > 0) {
+    return { id: commentId, deleted: true };
+  }
+
+  // Slow path: check existence + moderation permissions (post author or club admin/owner).
+  const [commentRes, post] = await Promise.all([
+    supabase
+      .from(COMMENTS_TABLE)
+      .select('id, user_id')
+      .eq('id', commentId)
+      .eq('post_id', postId)
+      .maybeSingle(),
+    fetchPostMetaForModeration(postId),
+  ]);
+
+  if (commentRes.error) throw commentRes.error;
+  if (!commentRes.data) {
+    const err: any = new Error('Comment not found');
+    err.status = 404;
+    throw err;
+  }
+
+  let isAuthorized = post?.author_id === userId;
+
+  if (!isAuthorized && post?.club_id) {
+    const [memberRes, clubRes] = await Promise.all([
+      supabase
+        .from(CLUB_MEMBERS_TABLE)
+        .select('role')
+        .eq('club_id', post.club_id)
+        .eq('user_id', userId)
+        .maybeSingle(),
+      supabase
+        .from(CLUBS_TABLE)
+        .select('created_by')
+        .eq('id', post.club_id)
+        .maybeSingle(),
+    ]);
+
+    const role = memberRes.data?.role;
+    isAuthorized =
+      role === 'admin' ||
+      role === 'owner' ||
+      clubRes.data?.created_by === userId;
+  }
+
+  if (!isAuthorized) {
+    const err: any = new Error('You are not authorized to delete this comment');
+    err.status = 403;
+    throw err;
+  }
+
+  const { error: adminDeleteError } = await supabase
+    .from(COMMENTS_TABLE)
+    .delete()
+    .eq('id', commentId)
+    .eq('post_id', postId);
+
+  if (adminDeleteError) throw adminDeleteError;
+
+  return { id: commentId, deleted: true };
+}
+
 export async function getPostById(postId: string, userId?: string): Promise<FeedPost | null> {
   let { data: post, error } = await supabase
     .from(POSTS_TABLE)
