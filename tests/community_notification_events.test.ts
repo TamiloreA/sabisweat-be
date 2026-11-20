@@ -695,7 +695,7 @@ describe('Community & Clubs Engine Notifications', () => {
           userId: 'owner-vip',
           type: 'community_club_join_request',
           title: 'New Member Request',
-          body: 'Hope Ade requested to join VIP Striders',
+          body: 'hopeade requested to join VIP Striders',
         })
       );
       expect(dispatchSpy).toHaveBeenCalledWith(

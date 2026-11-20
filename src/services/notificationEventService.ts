@@ -1130,8 +1130,8 @@ export async function handleJoinClubRequestEvent(
     .maybeSingle();
 
   const requesterName =
+    requester?.username?.trim() ||
     [requester?.first_name, requester?.last_name].filter(Boolean).join(' ') ||
-    requester?.username ||
     'A mover';
 
   const { data: admins } = await supabase

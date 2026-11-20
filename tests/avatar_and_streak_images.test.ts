@@ -264,7 +264,7 @@ describe('User Avatar & Streak Storage Image Resolver', () => {
         expect.objectContaining({
           type: 'community_club_join_request',
           title: 'New Member Request',
-          body: 'Dapo Ade requested to join Ikoyi Striders',
+          body: 'dapo requested to join Ikoyi Striders',
           imageUrl: expect.stringContaining('Male-Teen-Athletic-SkyBlue-Short-CurlyFade-WhiteSportTee.png'),
         })
       );
