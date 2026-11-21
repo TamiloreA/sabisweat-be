@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import {
   getFeed,
   createPost,
@@ -18,6 +19,9 @@ import {
   getClubEvents,
   rsvpClubEvent,
   requestJoinClub,
+  joinClubByCode,
+  updateClubJoinCode,
+  deleteClubJoinCode,
   leaveClub,
   cancelJoinRequest,
   getClubJoinRequests,
@@ -38,6 +42,25 @@ import { getClubChallenges, createChallenge } from '../controllers/challengeCont
 import { requireAuth } from '../middleware/auth';
 
 const router = Router();
+
+const joinCodeRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `club-code:${(req as any).user?.id || req.ip}`,
+  message: { success: false, message: 'Too many club code attempts. Please try again later.' },
+});
+
+const optionalJoinCodeRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => !req.body?.joinCode && !req.body?.code,
+  keyGenerator: (req) => `club-code:${(req as any).user?.id || req.ip}`,
+  message: { success: false, message: 'Too many club code attempts. Please try again later.' },
+});
 
 /**
  * @openapi
@@ -473,6 +496,7 @@ router.get('/posts/:id', requireAuth, getPostById);
  */
 router.post('/clubs', requireAuth, createClub);
 router.get('/clubs', requireAuth, getClubs);
+router.post('/clubs/join-by-code', requireAuth, joinCodeRateLimiter, joinClubByCode);
 
 /**
  * @openapi
@@ -1123,7 +1147,9 @@ router.get('/posts/:id/poll/results', requireAuth, getCommunityPollResult);
  *       200:
  *         description: Join request submitted or accepted
  */
-router.post('/clubs/:id/join', requireAuth, requestJoinClub);
+router.post('/clubs/:id/join', requireAuth, optionalJoinCodeRateLimiter, requestJoinClub);
+router.put('/clubs/:id/join-code', requireAuth, updateClubJoinCode);
+router.delete('/clubs/:id/join-code', requireAuth, deleteClubJoinCode);
 router.post('/clubs/:id/leave', requireAuth, leaveClub);
 router.delete('/clubs/:id/join', requireAuth, leaveClub);
 

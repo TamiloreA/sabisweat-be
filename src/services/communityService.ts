@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes, timingSafeEqual } from 'crypto';
 import { supabase } from '../config/database';
 import { AuthClaims } from '../middleware/auth';
 import {
@@ -1141,6 +1141,8 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
     showLeaderboard: clubData.show_leaderboard ?? true,
     isInviteOnly: clubData.is_invite_only ?? false,
     requiresApproval: clubData.requires_approval ?? true,
+    hasJoinCode: Boolean(clubData.join_code),
+    joinCode: clubData.join_code ?? null,
     createdAt: clubData.created_at,
   };
 }
@@ -1289,6 +1291,8 @@ export async function getClubs(
     showLeaderboard: club.show_leaderboard ?? true,
     isInviteOnly: club.is_invite_only ?? false,
     requiresApproval: club.requires_approval ?? true,
+    hasJoinCode: Boolean(club.join_code),
+    ...(userId && myAdminClubs.has(club.id) ? { joinCode: club.join_code ?? null } : {}),
     createdAt: club.created_at,
   }));
 
@@ -1368,6 +1372,8 @@ export async function getClubById(clubId: string, userId?: string): Promise<Club
     showLeaderboard: club.show_leaderboard ?? true,
     isInviteOnly: club.is_invite_only ?? false,
     requiresApproval: club.requires_approval ?? true,
+    hasJoinCode: Boolean(club.join_code),
+    ...(userId && isAdmin ? { joinCode: club.join_code ?? null } : {}),
     createdAt: club.created_at,
   };
 }
@@ -1480,29 +1486,176 @@ export async function rsvpClubEvent(eventId: string, userId: string, rsvp: boole
   }
 }
 
-export async function requestJoinClub(clubId: string, userId: string): Promise<JoinClubResult> {
-  // Fetch the club to check is_private
-  const { data: club, error: clubErr } = await supabase
-    .from(CLUBS_TABLE)
-    .select('id, is_private, name')
-    .eq('id', clubId)
-    .single();
+const JOIN_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const JOIN_CODE_REGEX = /^[A-Z0-9][A-Z0-9-]{2,14}[A-Z0-9]$/;
 
-  if (clubErr || !club) throw { status: 404, message: 'Club not found' };
+export function normalizeClubJoinCode(raw?: string | null): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().toUpperCase();
+  return trimmed.length > 0 ? trimmed : null;
+}
 
-  const { data: existingMember } = await supabase
-    .from(CLUB_MEMBERS_TABLE)
-    .select('user_id')
-    .eq('club_id', clubId)
-    .eq('user_id', userId)
-    .single();
+export function validateClubJoinCode(raw: string): string {
+  const normalized = normalizeClubJoinCode(raw);
+  if (!normalized || normalized.length < 4 || normalized.length > 16 || !JOIN_CODE_REGEX.test(normalized)) {
+    throw {
+      status: 400,
+      message: 'Club code must be 4–16 characters using letters, numbers, or hyphens',
+    };
+  }
+  return normalized;
+}
 
-  if (existingMember) throw new Error('User is already a member');
+export function generateClubJoinCode(clubName?: string): string {
+  const cleanPrefix = (clubName || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 3);
+  const bytes = randomBytes(6);
+  let suffix = '';
+  for (let i = 0; i < (cleanPrefix.length >= 2 ? 4 : 6); i++) {
+    suffix += JOIN_CODE_ALPHABET[bytes[i] % JOIN_CODE_ALPHABET.length];
+  }
+  return cleanPrefix.length >= 2 ? `${cleanPrefix}-${suffix}` : suffix;
+}
+
+function constantTimeCodeMatch(expected: string, provided: string): boolean {
+  const a = Buffer.from(expected.toUpperCase(), 'utf8');
+  const b = Buffer.from(provided.toUpperCase(), 'utf8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+function mapRpcJoinError(errorCode: string, message: string): never {
+  switch (errorCode) {
+    case 'CLUB_NOT_FOUND':
+      throw { status: 404, message: message || 'Club not found' };
+    case 'CLUB_NOT_APPROVED':
+      throw { status: 403, message: message || 'This club is not open for joining yet' };
+    case 'INVALID_CODE':
+      throw { status: 400, message: message || 'Invalid club code' };
+    case 'ALREADY_MEMBER':
+      throw { status: 409, message: message || 'User is already a member' };
+    case 'REQUEST_PENDING':
+      throw { status: 409, message: message || 'Join request is already pending' };
+    case 'REQUEST_APPROVED':
+      throw { status: 409, message: message || 'Join request is already approved' };
+    default:
+      throw { status: 400, message: message || 'Could not join club' };
+  }
+}
+
+export async function requestJoinClub(
+  clubId: string,
+  userId: string,
+  joinCode?: string
+): Promise<JoinClubResult> {
+  const normalizedCode = normalizeClubJoinCode(joinCode);
+
+  // Fast path: single-round-trip atomic Postgres RPC
+  if (typeof (supabase as any).rpc === 'function') {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('join_club_atomic', {
+      p_club_id: clubId,
+      p_user_id: userId,
+      p_join_code: normalizedCode,
+    });
+
+    if (!rpcErr && rpcData && typeof rpcData === 'object') {
+      if (rpcData.ok === false) {
+        mapRpcJoinError(rpcData.error_code, rpcData.message);
+      }
+      const joined = Boolean(rpcData.joined);
+      if (!joined) {
+        handleJoinClubRequestEvent(clubId, userId).catch((err) =>
+          console.warn('[communityService] Error handling join club request event:', err)
+        );
+      }
+      return {
+        joined,
+        bypassedApproval: Boolean(rpcData.bypassed_approval),
+        clubId: rpcData.club_id ?? clubId,
+        clubName: rpcData.club_name,
+        clubTheme: rpcData.club_theme,
+        membersCount: typeof rpcData.members_count === 'number' ? rpcData.members_count : 0,
+      };
+    }
+
+    // If error is not "missing RPC function", surface it cleanly
+    const isMissingRpc =
+      rpcErr?.code === '42883' ||
+      rpcErr?.code === 'PGRST202' ||
+      (typeof rpcErr?.message === 'string' && rpcErr.message.includes('join_club_atomic'));
+    if (rpcErr && !isMissingRpc) {
+      throw rpcErr;
+    }
+  }
+
+  // Fallback path (when RPC migration 036 is not yet applied): parallelized lookups
+  const [clubRes, memberRes] = await Promise.all([
+    supabase
+      .from(CLUBS_TABLE)
+      .select('id, is_private, name, status, join_code, theme')
+      .eq('id', clubId)
+      .single(),
+    supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .select('user_id')
+      .eq('club_id', clubId)
+      .eq('user_id', userId)
+      .maybeSingle(),
+  ]);
+
+  const club = clubRes.data;
+  if (clubRes.error || !club) throw { status: 404, message: 'Club not found' };
+  if (club.status && club.status !== 'approved') {
+    throw { status: 403, message: 'This club is not open for joining yet' };
+  }
+  if (memberRes.data) {
+    throw { status: 409, message: 'User is already a member' };
+  }
+
+  // Code bypass path
+  if (normalizedCode) {
+    const storedCode = normalizeClubJoinCode(club.join_code);
+    if (!storedCode || !constantTimeCodeMatch(storedCode, normalizedCode)) {
+      throw { status: 400, message: 'Invalid club code' };
+    }
+
+    const { error: memberError } = await supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .insert({ club_id: clubId, user_id: userId, role: 'member' });
+    if (memberError && memberError.code !== '23505') throw memberError;
+
+    // Resolve any prior pending join request + count members in parallel
+    const [, countRes] = await Promise.all([
+      supabase
+        .from('club_join_requests')
+        .update({ status: 'approved', updated_at: new Date().toISOString() })
+        .eq('club_id', clubId)
+        .eq('user_id', userId)
+        .eq('status', 'pending'),
+      supabase
+        .from(CLUB_MEMBERS_TABLE)
+        .select('*', { count: 'exact', head: true })
+        .eq('club_id', clubId),
+    ]);
+
+    const membersCount = countRes.count ?? 1;
+    supabase.from(CLUBS_TABLE).update({ members_count: membersCount }).eq('id', clubId).then(() => {});
+
+    return {
+      joined: true,
+      bypassedApproval: true,
+      clubId: club.id,
+      clubName: club.name,
+      clubTheme: club.theme || 'green',
+      membersCount,
+    };
+  }
 
   const isPublic = club.is_private === false;
 
   if (isPublic) {
-    // Public club: immediately add as member
     const { error: memberError } = await supabase
       .from(CLUB_MEMBERS_TABLE)
       .insert({
@@ -1510,57 +1663,53 @@ export async function requestJoinClub(clubId: string, userId: string): Promise<J
         user_id: userId,
         role: 'member',
       });
-    if (memberError) throw memberError;
+    if (memberError && memberError.code !== '23505') throw memberError;
 
-    // Get updated members count
     const { count } = await supabase
       .from(CLUB_MEMBERS_TABLE)
       .select('*', { count: 'exact', head: true })
       .eq('club_id', clubId);
 
-    return { joined: true, membersCount: count ?? 1 };
+    const membersCount = count ?? 1;
+    supabase.from(CLUBS_TABLE).update({ members_count: membersCount }).eq('id', clubId).then(() => {});
+
+    return {
+      joined: true,
+      bypassedApproval: false,
+      clubId: club.id,
+      clubName: club.name,
+      clubTheme: club.theme || 'green',
+      membersCount,
+    };
   }
 
-  // Private club: go through join request flow
+  // Private club without code: go through join request flow
   const { data: existingRequest } = await supabase
     .from('club_join_requests')
     .select('status')
     .eq('club_id', clubId)
     .eq('user_id', userId)
-    .single();
+    .maybeSingle();
 
   if (existingRequest) {
-    if (existingRequest.status === 'pending') throw new Error('Join request is already pending');
-    if (existingRequest.status === 'approved') throw new Error('Join request is already approved');
-    // If rejected, allow re-requesting by updating status
+    if (existingRequest.status === 'pending') throw { status: 409, message: 'Join request is already pending' };
+    if (existingRequest.status === 'approved') throw { status: 409, message: 'Join request is already approved' };
     const { error } = await supabase
       .from('club_join_requests')
       .update({ status: 'pending', updated_at: new Date().toISOString() })
       .eq('club_id', clubId)
       .eq('user_id', userId);
     if (error) throw error;
-
-    handleJoinClubRequestEvent(clubId, userId).catch((err) =>
-      console.warn('[communityService] Error handling join club request event:', err)
-    );
-
-    const { count } = await supabase
-      .from(CLUB_MEMBERS_TABLE)
-      .select('*', { count: 'exact', head: true })
-      .eq('club_id', clubId);
-
-    return { joined: false, membersCount: count ?? 0 };
+  } else {
+    const { error } = await supabase
+      .from('club_join_requests')
+      .insert({
+        club_id: clubId,
+        user_id: userId,
+        status: 'pending',
+      });
+    if (error) throw error;
   }
-
-  const { error } = await supabase
-    .from('club_join_requests')
-    .insert({
-      club_id: clubId,
-      user_id: userId,
-      status: 'pending',
-    });
-
-  if (error) throw error;
 
   handleJoinClubRequestEvent(clubId, userId).catch((err) =>
     console.warn('[communityService] Error handling join club request event:', err)
@@ -1571,7 +1720,152 @@ export async function requestJoinClub(clubId: string, userId: string): Promise<J
     .select('*', { count: 'exact', head: true })
     .eq('club_id', clubId);
 
-  return { joined: false, membersCount: count ?? 0 };
+  return {
+    joined: false,
+    bypassedApproval: false,
+    clubId: club.id,
+    clubName: club.name,
+    clubTheme: club.theme || 'green',
+    membersCount: count ?? 0,
+  };
+}
+
+export async function joinClubByCode(
+  joinCode: string,
+  userId: string
+): Promise<JoinClubResult> {
+  const normalizedCode = normalizeClubJoinCode(joinCode);
+  if (!normalizedCode) {
+    throw { status: 400, message: 'Club code is required' };
+  }
+
+  // Fast path: single-round-trip RPC using the unique partial index on UPPER(join_code)
+  if (typeof (supabase as any).rpc === 'function') {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('join_club_atomic', {
+      p_club_id: null,
+      p_user_id: userId,
+      p_join_code: normalizedCode,
+    });
+
+    if (!rpcErr && rpcData && typeof rpcData === 'object') {
+      if (rpcData.ok === false) {
+        mapRpcJoinError(rpcData.error_code, rpcData.message);
+      }
+      return {
+        joined: true,
+        bypassedApproval: true,
+        clubId: rpcData.club_id,
+        clubName: rpcData.club_name,
+        clubTheme: rpcData.club_theme,
+        membersCount: typeof rpcData.members_count === 'number' ? rpcData.members_count : 1,
+      };
+    }
+
+    const isMissingRpc =
+      rpcErr?.code === '42883' ||
+      rpcErr?.code === 'PGRST202' ||
+      (typeof rpcErr?.message === 'string' && rpcErr.message.includes('join_club_atomic'));
+    if (rpcErr && !isMissingRpc) {
+      throw rpcErr;
+    }
+  }
+
+  // Fallback path: lookup by normalized uppercase code, then delegate to requestJoinClub
+  const { data: club, error: clubErr } = await supabase
+    .from(CLUBS_TABLE)
+    .select('id, status')
+    .ilike('join_code', normalizedCode)
+    .maybeSingle();
+
+  if (clubErr || !club) {
+    throw { status: 400, message: 'Invalid club code' };
+  }
+
+  return requestJoinClub(club.id, userId, normalizedCode);
+}
+
+export async function updateClubJoinCode(
+  clubId: string,
+  userId: string,
+  input: { joinCode?: string | null; generate?: boolean }
+): Promise<{ joinCode: string | null; hasJoinCode: boolean }> {
+  // Parallel club + admin verification
+  const [clubRes, memberRes] = await Promise.all([
+    supabase
+      .from(CLUBS_TABLE)
+      .select('id, name, created_by, is_private')
+      .eq('id', clubId)
+      .single(),
+    supabase
+      .from(CLUB_MEMBERS_TABLE)
+      .select('role')
+      .eq('club_id', clubId)
+      .eq('user_id', userId)
+      .maybeSingle(),
+  ]);
+
+  const club = clubRes.data;
+  if (clubRes.error || !club) {
+    throw { status: 404, message: 'Club not found' };
+  }
+
+  const isAdminOrOwner =
+    club.created_by === userId ||
+    memberRes.data?.role === 'admin' ||
+    memberRes.data?.role === 'owner';
+
+  if (!isAdminOrOwner) {
+    throw { status: 403, message: 'Only club admins or owners can manage the club code' };
+  }
+
+  const nowIso = new Date().toISOString();
+
+  // Disable / clear code
+  if (!input.generate && (input.joinCode === null || input.joinCode === '')) {
+    const { error: clearErr } = await supabase
+      .from(CLUBS_TABLE)
+      .update({ join_code: null, join_code_updated_at: nowIso })
+      .eq('id', clubId);
+
+    if (clearErr) throw clearErr;
+    return { joinCode: null, hasJoinCode: false };
+  }
+
+  // Auto-generate with up to 3 collision retries
+  if (input.generate) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const candidate = generateClubJoinCode(club.name);
+      const { error: genErr } = await supabase
+        .from(CLUBS_TABLE)
+        .update({ join_code: candidate, join_code_updated_at: nowIso })
+        .eq('id', clubId);
+
+      if (!genErr) {
+        return { joinCode: candidate, hasJoinCode: true };
+      }
+      if (genErr.code !== '23505') throw genErr;
+    }
+    throw { status: 409, message: 'Could not generate a unique code. Please try again.' };
+  }
+
+  if (typeof input.joinCode !== 'string') {
+    throw { status: 400, message: 'joinCode or generate flag is required' };
+  }
+
+  const validatedCode = validateClubJoinCode(input.joinCode);
+  const { error: updateErr } = await supabase
+    .from(CLUBS_TABLE)
+    .update({ join_code: validatedCode, join_code_updated_at: nowIso })
+    .eq('id', clubId);
+
+  if (updateErr) {
+    if (updateErr.code === '23505') {
+      throw { status: 409, message: 'That club code is already taken. Try another one.' };
+    }
+    throw updateErr;
+  }
+
+  return { joinCode: validatedCode, hasJoinCode: true };
 }
 
 export async function leaveClub(clubId: string, userId: string): Promise<JoinClubResult> {

@@ -307,15 +307,101 @@ export const rsvpClubEvent = async (req: Request, res: Response, next: NextFunct
 
 export const requestJoinClub = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await communityService.requestJoinClub(req.params.id, req.user!.id);
+    const rawCode = req.body?.joinCode ?? req.body?.code;
+    const joinCode = typeof rawCode === 'string' ? rawCode : undefined;
+    const result = await communityService.requestJoinClub(req.params.id, req.user!.id, joinCode);
     res.status(200).json({
       success: true,
-      message: result.joined ? 'Joined club successfully' : 'Join request sent',
+      message: result.joined
+        ? 'Joined club successfully'
+        : 'Your request to join has been sent. Please wait for the club admin to approve it.',
       joined: result.joined,
+      bypassedApproval: Boolean(result.bypassedApproval),
+      clubId: result.clubId ?? req.params.id,
+      clubName: result.clubName,
+      clubTheme: result.clubTheme,
       membersCount: result.membersCount,
       data: result,
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.status) {
+      res.status(error.status).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+};
+
+export const joinClubByCode = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rawCode = req.body?.joinCode ?? req.body?.code;
+    if (typeof rawCode !== 'string' || !rawCode.trim()) {
+      res.status(400).json({ success: false, message: 'Club code is required' });
+      return;
+    }
+
+    const result = await communityService.joinClubByCode(rawCode, req.user!.id);
+    res.status(200).json({
+      success: true,
+      message: 'Joined club successfully',
+      joined: result.joined,
+      bypassedApproval: true,
+      clubId: result.clubId,
+      clubName: result.clubName,
+      clubTheme: result.clubTheme,
+      membersCount: result.membersCount,
+      data: result,
+    });
+  } catch (error: any) {
+    if (error?.status) {
+      res.status(error.status).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+};
+
+export const updateClubJoinCode = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { joinCode, code, generate } = req.body ?? {};
+    const resolvedCode = joinCode !== undefined ? joinCode : code;
+    const result = await communityService.updateClubJoinCode(req.params.id, req.user!.id, {
+      joinCode: resolvedCode,
+      generate: generate === true,
+    });
+    res.status(200).json({
+      success: true,
+      message: result.joinCode ? 'Club code updated' : 'Club code removed',
+      data: result,
+      joinCode: result.joinCode,
+      hasJoinCode: result.hasJoinCode,
+    });
+  } catch (error: any) {
+    if (error?.status) {
+      res.status(error.status).json({ success: false, message: error.message });
+      return;
+    }
+    next(error);
+  }
+};
+
+export const deleteClubJoinCode = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await communityService.updateClubJoinCode(req.params.id, req.user!.id, {
+      joinCode: null,
+    });
+    res.status(200).json({
+      success: true,
+      message: 'Club code removed',
+      data: result,
+      joinCode: result.joinCode,
+      hasJoinCode: result.hasJoinCode,
+    });
+  } catch (error: any) {
+    if (error?.status) {
+      res.status(error.status).json({ success: false, message: error.message });
+      return;
+    }
     next(error);
   }
 };

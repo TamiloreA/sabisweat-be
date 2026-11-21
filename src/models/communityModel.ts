@@ -156,6 +156,8 @@ export interface ClubDetail {
   showLeaderboard: boolean;
   isInviteOnly: boolean;
   requiresApproval: boolean;
+  hasJoinCode?: boolean;
+  joinCode?: string | null;
   createdAt: string;
 }
 
@@ -164,11 +166,17 @@ export interface ClubSettings {
   showLeaderboard?: boolean;
   isInviteOnly?: boolean;
   requiresApproval?: boolean;
+  joinCode?: string | null;
+  generateJoinCode?: boolean;
 }
 
 export interface JoinClubResult {
   joined: boolean;
   membersCount: number;
+  bypassedApproval?: boolean;
+  clubId?: string;
+  clubName?: string;
+  clubTheme?: string;
 }
 
 export interface ClubLeaderboardEntry {
