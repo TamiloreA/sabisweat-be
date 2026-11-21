@@ -9,8 +9,7 @@ import { dispatchNotification } from './notificationDispatcher';
 import { fetchReceipts } from './expoPushService';
 import { deactivateInvalidToken } from './deviceService';
 import {
-  processMorningKickoffJob,
-  processStreakAtRiskJob,
+  processStepCheckInJob,
   processChallengeEndingSoonJob,
 } from './notificationEventService';
 
@@ -263,17 +262,15 @@ export async function processPendingReceipts(batchSize = 100): Promise<{
 export async function runAllCronTasks(now: Date = new Date()): Promise<{
   schedules: { processed: number; completed: number; expired: number; failed: number };
   receipts: { checked: number; ok: number; failed: number; deactivatedTokens: number };
-  morningKickoff: { evaluated: number; sent: number };
-  streakAtRisk: { evaluated: number; sent: number };
+  stepCheckIns: { evaluated: number; sent: number };
   challengeEndingSoon: { challengesChecked: number; sent: number };
 }> {
-  const [schedules, receipts, morningKickoff, streakAtRisk, challengeEndingSoon] = await Promise.all([
+  const [schedules, receipts, stepCheckIns, challengeEndingSoon] = await Promise.all([
     processScheduledNotifications(),
     processPendingReceipts(),
-    processMorningKickoffJob(now),
-    processStreakAtRiskJob(now),
+    processStepCheckInJob(now),
     processChallengeEndingSoonJob(now),
   ]);
 
-  return { schedules, receipts, morningKickoff, streakAtRisk, challengeEndingSoon };
+  return { schedules, receipts, stepCheckIns, challengeEndingSoon };
 }

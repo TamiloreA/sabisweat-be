@@ -177,6 +177,7 @@ export async function dispatchNotification(
     const isPushEnabled = await isPushCategoryEnabled(userId, type);
 
     const dataPayload: Record<string, any> = data || {};
+    const { stepReminderMeta, ...publicDataPayload } = dataPayload;
 
     if (isPushEnabled) {
       const activeDevices = await getActiveDevicesForUser(userId);
@@ -191,12 +192,12 @@ export async function dispatchNotification(
             priority: 'high',
             channelId: 'default',
             data: {
-              ...dataPayload,
-              ...(notificationId ? { notificationId } : (dataPayload.notificationId ? { notificationId: dataPayload.notificationId } : {})),
+              ...publicDataPayload,
+              ...(notificationId ? { notificationId } : (publicDataPayload.notificationId ? { notificationId: publicDataPayload.notificationId } : {})),
               type,
-              screen: dataPayload.screen,
-              params: dataPayload.params,
-              deepLink: dataPayload.deepLink,
+              screen: publicDataPayload.screen,
+              params: publicDataPayload.params,
+              deepLink: publicDataPayload.deepLink,
             },
           };
 
@@ -233,6 +234,7 @@ export async function dispatchNotification(
               token: device.expo_push_token.slice(0, 20) + '...',
               platform: device.platform,
               ...(channel !== 'push_only' ? { badge: result.unreadCount } : {}),
+              ...(stepReminderMeta ? { stepReminder: stepReminderMeta } : {}),
             },
             created_at: new Date().toISOString(),
           };

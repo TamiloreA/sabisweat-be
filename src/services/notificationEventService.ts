@@ -11,6 +11,12 @@ import { notificationTemplates, resolveChallengeNotificationImage } from './noti
 import { getCurrentStreak } from './streaksService';
 import { getLeaderboard } from './challengeService';
 import { resolveUserAvatarUrl, resolveStreakNotificationImageUrl } from '../utils/avatarResolver';
+import {
+  evaluateStepSyncReminder,
+  processStepCheckInJob,
+} from './stepNotificationService';
+
+export { processStepCheckInJob };
 
 const TABLE_PROFILES = 'profiles';
 const TABLE_DAILY_STEPS = 'daily_steps';
@@ -105,19 +111,26 @@ async function fetchChallengeRow(challengeId: string): Promise<any | null> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Evaluates step milestone events (50%, 80%, 100%) during/after step synchronization
+ * Evaluates 100% Daily Goal Achieved celebration and 90% near-goal step reminder
+ * during/after step synchronization, plus active challenge progress.
  */
 export async function handleStepSyncEvents(
   userId: string,
   dateStr: string,
   currentSteps: number,
-  _timeZone?: string
+  timeZone?: string
 ): Promise<{
   milestone50: boolean;
   milestone80: boolean;
+  nearGoalSent: boolean;
   goalCompleted: boolean;
 }> {
-  const result = { milestone50: false, milestone80: false, goalCompleted: false };
+  const result = {
+    milestone50: false,
+    milestone80: false,
+    nearGoalSent: false,
+    goalCompleted: false,
+  };
 
   // 1. Get user step goal
   const { data: profile } = await supabase
@@ -132,7 +145,7 @@ export async function handleStepSyncEvents(
   const key100 = `step_goal_100:${userId}:${dateStr}`;
   const already100 = await hasNotification(userId, key100);
 
-  // 2. 100% Daily Goal Completed
+  // 2. 100% Daily Goal Completed celebration (kept separate from the 2/day reminder cap)
   if (currentSteps >= stepGoal) {
     if (!already100) {
       // Query authoritative streak logic
@@ -158,49 +171,19 @@ export async function handleStepSyncEvents(
     }
   }
 
-  // If user has already reached 100%, 50% and 80% notifications are suppressed
+  // If user has already reached 100%, suppress all step reminders for the rest of the local day
   if (already100 || currentSteps >= stepGoal) {
-    // Proceed to challenge progress evaluation
     await evaluateActiveChallengesForUser(userId, currentSteps);
     return result;
   }
 
-  // 3. 80% Step Goal Milestone
-  if (currentSteps >= Math.floor(stepGoal * 0.8)) {
-    const key80 = `step_milestone_80:${userId}:${dateStr}`;
-    const already80 = await hasNotification(userId, key80);
-    if (!already80) {
-      const remainingSteps = Math.max(0, stepGoal - currentSteps);
-      const payload = notificationTemplates.stepMilestone80(remainingSteps);
-      await dispatchNotification({
-        userId,
-        type: payload.category,
-        title: payload.title,
-        body: payload.body,
-        data: payload.data,
-        idempotencyKey: key80,
-      });
-      result.milestone80 = true;
-    }
-  }
-
-  // 4. 50% Step Goal Milestone
-  if (currentSteps >= Math.floor(stepGoal * 0.5)) {
-    const key50 = `step_milestone_50:${userId}:${dateStr}`;
-    const already50 = await hasNotification(userId, key50);
-    if (!already50) {
-      const streakImageUrl = resolveStreakNotificationImageUrl('step_milestone_50');
-      const payload = notificationTemplates.stepMilestone50(currentSteps, streakImageUrl);
-      await dispatchNotification({
-        userId,
-        type: payload.category,
-        title: payload.title,
-        body: payload.body,
-        imageUrl: payload.imageUrl,
-        data: payload.data,
-        idempotencyKey: key50,
-      });
-      result.milestone50 = true;
+  // 3. Near-goal (90% to <100%) step reminder trigger (replaces old 50% / 80% sync milestones)
+  if (currentSteps / stepGoal >= 0.9) {
+    try {
+      const syncOutcome = await evaluateStepSyncReminder(userId, dateStr, currentSteps, timeZone);
+      result.nearGoalSent = syncOutcome.sent;
+    } catch (err) {
+      console.warn('[notificationEvent] Error evaluating near-goal step reminder:', err);
     }
   }
 

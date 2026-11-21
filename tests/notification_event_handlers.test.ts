@@ -146,35 +146,19 @@ describe('Notification Event Handlers', () => {
   });
 
   describe('handleStepSyncEvents', () => {
-    it('dispatches 50% step milestone when crossing 5,000 / 10,000 steps', async () => {
-      const res = await eventService.handleStepSyncEvents('user-1', '2026-11-09', 5500);
+    it('does not dispatch legacy 50% or 80% sync milestones', async () => {
+      const res50 = await eventService.handleStepSyncEvents('user-1', '2026-11-09', 5500);
+      expect(res50.milestone50).toBe(false);
+      expect(res50.milestone80).toBe(false);
+      expect(res50.nearGoalSent).toBe(false);
+      expect(res50.goalCompleted).toBe(false);
 
-      expect(res.milestone50).toBe(true);
-      expect(res.milestone80).toBe(false);
-      expect(res.goalCompleted).toBe(false);
-
-      expect(dispatchSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: 'user-1',
-          type: 'DAILY_STEP_REMINDER',
-          title: 'Halfway to your goal 💪',
-          idempotencyKey: 'step_milestone_50:user-1:2026-11-09',
-        })
-      );
-    });
-
-    it('dispatches 80% step milestone when crossing 8,000 steps', async () => {
-      const res = await eventService.handleStepSyncEvents('user-1', '2026-11-09', 8500);
-
-      expect(res.milestone80).toBe(true);
-      expect(dispatchSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: 'user-1',
-          type: 'DAILY_STEP_REMINDER',
-          title: 'Almost there 💪',
-          idempotencyKey: 'step_milestone_80:user-1:2026-11-09',
-        })
-      );
+      const res80 = await eventService.handleStepSyncEvents('user-1', '2026-11-09', 8500);
+      expect(res80.milestone50).toBe(false);
+      expect(res80.milestone80).toBe(false);
+      expect(res80.nearGoalSent).toBe(false);
+      expect(res80.goalCompleted).toBe(false);
+      expect(dispatchSpy).not.toHaveBeenCalled();
     });
 
     it('dispatches 100% daily goal completed and confirms streak via getCurrentStreak', async () => {
@@ -193,7 +177,7 @@ describe('Notification Event Handlers', () => {
       );
     });
 
-    it('suppresses 50% and 80% milestones if 100% already reached', async () => {
+    it('suppresses step reminders if 100% already reached', async () => {
       // Simulate 100% already dispatched
       mockNotifications.push({
         user_id: 'user-1',
@@ -204,6 +188,7 @@ describe('Notification Event Handlers', () => {
 
       expect(res.milestone50).toBe(false);
       expect(res.milestone80).toBe(false);
+      expect(res.nearGoalSent).toBe(false);
       expect(res.goalCompleted).toBe(false);
       expect(dispatchSpy).not.toHaveBeenCalled();
     });
