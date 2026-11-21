@@ -1350,6 +1350,7 @@ export async function createChallenge(
   let hostName = input.hostName;
   let hostLogoUrl = input.hostLogoUrl;
   let clubInfo: ClubHostInfo | undefined;
+  let coHostClubInfo: ClubHostInfo | undefined;
 
   // If club specified, verify club & verify user is admin
   if (input.hostClubId) {
@@ -1360,14 +1361,14 @@ export async function createChallenge(
       const sanitizedTag = input.hostClubId.replace(/^@/, '');
       const { data } = await supabase
         .from(CLUBS_TABLE)
-        .select('id, name, profile_image_url, theme')
+        .select('id, name, profile_image_url, theme, status')
         .eq('tag', sanitizedTag)
         .maybeSingle();
       club = data;
     } else {
       const { data } = await supabase
         .from(CLUBS_TABLE)
-        .select('id, name, profile_image_url, theme')
+        .select('id, name, profile_image_url, theme, status')
         .eq('id', input.hostClubId)
         .maybeSingle();
       club = data;
@@ -1392,6 +1393,16 @@ export async function createChallenge(
       throw { status: 403, message: 'Only club admins can create challenges for this club' };
     }
 
+    if (club.status !== 'approved') {
+      throw {
+        status: 403,
+        message:
+          club.status === 'pending'
+            ? 'Clubs under review cannot create challenges until approved'
+            : 'Only approved clubs can create challenges',
+      };
+    }
+
     // Always use club name and logo as the challenge host
     hostName = club.name;
     hostLogoUrl = club.profile_image_url;
@@ -1400,6 +1411,23 @@ export async function createChallenge(
     const profileMap = await fetchProfilesMap([userId]);
     const userProfile = profileMap.get(userId);
     hostName = [userProfile?.first_name, userProfile?.last_name].filter(Boolean).join(' ') || userProfile?.username || 'Sabi Sweat';
+  }
+
+  // Validate co-host club if provided (must exist and be approved)
+  if (input.coHostClubId) {
+    const { data: coClub } = await supabase
+      .from(CLUBS_TABLE)
+      .select('id, name, profile_image_url, theme, status')
+      .eq('id', input.coHostClubId)
+      .maybeSingle();
+
+    if (!coClub) {
+      throw { status: 404, message: 'Co-host club not found' };
+    }
+    if (coClub.status !== 'approved') {
+      throw { status: 403, message: 'Co-host club must be approved' };
+    }
+    coHostClubInfo = coClub as ClubHostInfo;
   }
 
   // Upload hero image if base64 provided
@@ -1524,17 +1552,6 @@ export async function createChallenge(
     handleChallengeCreatedEvent(created.id).catch((err) => {
       console.warn('[challengeService] Error dispatching challenge discovery notifications:', err);
     });
-  }
-
-  // Resolve co-host club info
-  let coHostClubInfo: ClubHostInfo | undefined;
-  if (input.coHostClubId) {
-    const { data: coClub } = await supabase
-      .from(CLUBS_TABLE)
-      .select('id, name, profile_image_url, theme')
-      .eq('id', input.coHostClubId)
-      .maybeSingle();
-    if (coClub) coHostClubInfo = coClub as ClubHostInfo;
   }
 
   return mapChallengeRow(created as ChallengeRow, 0, { joined: false }, undefined, clubInfo, coHostClubInfo);
