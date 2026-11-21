@@ -246,6 +246,7 @@ export interface ExpoPushMessage {
   priority?: 'default' | 'normal' | 'high';
   channelId?: string;
   categoryId?: string;
+  mutableContent?: boolean;
   richContent?: {
     image?: string;
   };

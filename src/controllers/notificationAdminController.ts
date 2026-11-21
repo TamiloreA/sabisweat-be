@@ -4,7 +4,11 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { dispatchNotification } from '../services/notificationDispatcher';
+import {
+  dispatchNotification,
+  resolveRichPushImageUrl,
+  applyRichPushImage,
+} from '../services/notificationDispatcher';
 import { sendPushChunked } from '../services/expoPushService';
 import { runAllCronTasks } from '../services/notificationCronService';
 import { disburseChallengeRewards } from '../services/notificationEventService';
@@ -12,19 +16,44 @@ import { checkAndAwardSabiLevelMilestones } from '../services/sabiLevelService';
 
 export const dispatchToUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { userId, title, body, data, type, imageUrl, channel, emailSubject, emailHtml } = req.body;
+    const {
+      userId,
+      title,
+      body,
+      data,
+      type,
+      imageUrl,
+      image,
+      image_url,
+      mediaUrl,
+      richContent,
+      fcm_options,
+      channel,
+      emailSubject,
+      emailHtml,
+    } = req.body;
 
     if (!userId || !title || !body) {
       res.status(400).json({ success: false, message: 'userId, title, and body are required' });
       return;
     }
 
+    const resolvedImageUrl = resolveRichPushImageUrl({
+      imageUrl,
+      image,
+      image_url,
+      mediaUrl,
+      richContent,
+      fcm_options,
+      data,
+    });
+
     const result = await dispatchNotification({
       userId,
       type: type || data?.type || 'CUSTOM_NOTIFICATION',
       title,
       body,
-      imageUrl,
+      imageUrl: resolvedImageUrl ?? imageUrl,
       data: data || {},
       channel: channel || 'all',
       emailSubject,
@@ -45,14 +74,35 @@ export const dispatchToUser = async (req: Request, res: Response, next: NextFunc
 
 export const sendTestPush = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { token, title, body, data } = req.body;
+    const {
+      token,
+      title,
+      body,
+      data,
+      imageUrl,
+      image,
+      image_url,
+      mediaUrl,
+      richContent,
+      fcm_options,
+    } = req.body;
 
     if (!token || !title || !body) {
       res.status(400).json({ success: false, message: 'token, title, and body are required' });
       return;
     }
 
-    const results = await sendPushChunked([
+    const resolvedImageUrl = resolveRichPushImageUrl({
+      imageUrl,
+      image,
+      image_url,
+      mediaUrl,
+      richContent,
+      fcm_options,
+      data,
+    });
+
+    const pushMessage = applyRichPushImage(
       {
         to: token,
         title,
@@ -61,7 +111,10 @@ export const sendTestPush = async (req: Request, res: Response, next: NextFuncti
         sound: 'default',
         priority: 'high',
       },
-    ]);
+      resolvedImageUrl
+    );
+
+    const results = await sendPushChunked([pushMessage]);
 
     const ticket = results[0]?.ticket;
     res.status(200).json({

@@ -9,6 +9,43 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const PUSH_DATA_IMAGE_KEYS = ["image", "imageUrl", "image_url", "mediaUrl"] as const;
+
+function isValidHttpsImageUrl(url: unknown): url is string {
+  if (typeof url !== "string") return false;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === "null" || trimmed === "undefined") return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "https:" && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function resolveRichPushImageUrl(payload: Record<string, any>): string | undefined {
+  const candidates: unknown[] = [
+    payload.richContent?.image,
+    payload.imageUrl,
+    payload.image,
+    payload.image_url,
+    payload.mediaUrl,
+    payload.fcm_options?.image,
+    payload.data?.imageUrl,
+    payload.data?.image,
+    payload.data?.image_url,
+    payload.data?.mediaUrl,
+  ];
+
+  for (const candidate of candidates) {
+    if (isValidHttpsImageUrl(candidate)) {
+      return candidate.trim();
+    }
+  }
+
+  return undefined;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -21,7 +58,15 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body = await req.json();
-    const { userId, title, body: msgBody, type, data, channel = "all" } = body;
+    const {
+      userId,
+      title,
+      body: msgBody,
+      type,
+      data,
+      imageUrl,
+      channel = "all",
+    } = body;
 
     if (!userId || !title || !msgBody) {
       return new Response(
@@ -29,6 +74,8 @@ Deno.serve(async (req: Request) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    const richImageUrl = resolveRichPushImageUrl(body);
 
     // 1. Create in-app notification
     const { data: notification, error: notifError } = await supabase
@@ -39,6 +86,7 @@ Deno.serve(async (req: Request) => {
         title,
         body: msgBody,
         description: msgBody,
+        image_url: richImageUrl ?? (typeof imageUrl === "string" ? imageUrl : null),
         data: data || {},
       })
       .select()
@@ -65,6 +113,20 @@ Deno.serve(async (req: Request) => {
         .eq("notifications_enabled", true);
 
       if (devices && devices.length > 0) {
+        const sanitizedData: Record<string, any> = {
+          ...(data || {}),
+          notificationId: notification?.id,
+          type,
+        };
+        for (const key of PUSH_DATA_IMAGE_KEYS) {
+          if (key in sanitizedData && !isValidHttpsImageUrl(sanitizedData[key])) {
+            delete sanitizedData[key];
+          }
+        }
+        if (richImageUrl) {
+          sanitizedData.imageUrl = richImageUrl;
+        }
+
         const messages = devices.map((d: any) => ({
           to: d.expo_push_token,
           title,
@@ -72,11 +134,13 @@ Deno.serve(async (req: Request) => {
           badge: unreadCount,
           sound: "default",
           priority: "high",
-          data: {
-            ...data,
-            notificationId: notification?.id,
-            type,
-          },
+          data: sanitizedData,
+          ...(richImageUrl
+            ? {
+                mutableContent: true,
+                richContent: { image: richImageUrl },
+              }
+            : {}),
         }));
 
         const pushHeaders: Record<string, string> = {

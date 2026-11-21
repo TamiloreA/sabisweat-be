@@ -50,9 +50,24 @@ export function resolveChallengeNotificationImage(
     return challengeImage.trim();
   }
 
-  const heroImage = challenge.heroImageBase64 || challenge.hero_image_base64 || challenge.hero_image_url;
-  if (heroImage && typeof heroImage === 'string' && heroImage.trim().length > 0) {
-    return heroImage.trim();
+  const heroImageUrl = challenge.hero_image_url;
+  const heroImageBase64 = challenge.heroImageBase64 || challenge.hero_image_base64;
+
+  // Prefer HTTPS hero_image_url over raw base64 data URIs for rich push notifications
+  if (
+    heroImageUrl &&
+    typeof heroImageUrl === 'string' &&
+    heroImageUrl.trim().toLowerCase().startsWith('https://')
+  ) {
+    return heroImageUrl.trim();
+  }
+
+  if (heroImageBase64 && typeof heroImageBase64 === 'string' && heroImageBase64.trim().length > 0) {
+    return heroImageBase64.trim();
+  }
+
+  if (heroImageUrl && typeof heroImageUrl === 'string' && heroImageUrl.trim().length > 0) {
+    return heroImageUrl.trim();
   }
 
   return undefined;

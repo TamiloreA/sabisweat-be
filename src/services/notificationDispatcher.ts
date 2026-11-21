@@ -17,6 +17,92 @@ import { sendPushChunked } from './expoPushService';
 import { sendEmail } from './resendEmailService';
 
 const TABLE_ATTEMPTS = 'notification_delivery_attempts';
+const PUSH_DATA_IMAGE_KEYS = ['image', 'imageUrl', 'image_url', 'mediaUrl'] as const;
+
+export interface RichImagePayloadSources {
+  imageUrl?: unknown;
+  image?: unknown;
+  image_url?: unknown;
+  mediaUrl?: unknown;
+  richContent?: { image?: unknown } | null;
+  fcm_options?: { image?: unknown } | null;
+  data?: Record<string, any> | null;
+}
+
+/**
+ * Validates that a candidate push image URL is a well-formed HTTPS URL.
+ * Rejects empty values, cleartext http:// URLs, and inline data:image/ base64 strings
+ * (which cannot be fetched by the iOS Notification Service Extension and risk APNs MessageTooBig).
+ */
+export function isValidHttpsImageUrl(url: unknown): url is string {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'https:' && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolves the first valid HTTPS image URL from supported top-level and data payload keys.
+ */
+export function resolveRichPushImageUrl(sources: RichImagePayloadSources): string | undefined {
+  const candidates: unknown[] = [
+    sources.richContent?.image,
+    sources.imageUrl,
+    sources.image,
+    sources.image_url,
+    sources.mediaUrl,
+    sources.fcm_options?.image,
+    sources.data?.imageUrl,
+    sources.data?.image,
+    sources.data?.image_url,
+    sources.data?.mediaUrl,
+  ];
+
+  for (const candidate of candidates) {
+    if (isValidHttpsImageUrl(candidate)) {
+      return candidate.trim();
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Sanitizes push data image fields (removing non-HTTPS/base64 values that cannot be used in push)
+ * and attaches Expo rich image fields (`mutableContent: true`, `richContent: { image }`, `data.imageUrl`)
+ * strictly when a valid HTTPS image URL is present.
+ */
+export function applyRichPushImage(
+  msg: ExpoPushMessage,
+  httpsImageUrl?: string
+): ExpoPushMessage {
+  const sanitizedData: Record<string, any> = { ...(msg.data || {}) };
+
+  for (const key of PUSH_DATA_IMAGE_KEYS) {
+    if (key in sanitizedData && !isValidHttpsImageUrl(sanitizedData[key])) {
+      delete sanitizedData[key];
+    }
+  }
+
+  if (httpsImageUrl && isValidHttpsImageUrl(httpsImageUrl)) {
+    const cleanUrl = httpsImageUrl.trim();
+    sanitizedData.imageUrl = cleanUrl;
+    msg.data = sanitizedData;
+    msg.mutableContent = true;
+    msg.richContent = { image: cleanUrl };
+  } else {
+    msg.data = sanitizedData;
+    delete msg.mutableContent;
+    delete msg.richContent;
+  }
+
+  return msg;
+}
 
 /**
  * Dispatches a notification across applicable channels (in-app, push, email)
@@ -47,6 +133,8 @@ export async function dispatchNotification(
     errors: [],
   };
 
+  const richPushImageUrl = resolveRichPushImageUrl({ imageUrl, data });
+
   // 1. Create In-App Notification (unless channel is email-only)
   let notificationId: string | undefined;
   if (channel === 'all' || channel === 'in_app' || channel === 'push') {
@@ -57,7 +145,7 @@ export async function dispatchNotification(
         title,
         body,
         description: body,
-        imageUrl,
+        imageUrl: imageUrl ?? richPushImageUrl,
         data,
         expiresAt,
         idempotencyKey,
@@ -109,7 +197,6 @@ export async function dispatchNotification(
               screen: dataPayload.screen,
               params: dataPayload.params,
               deepLink: dataPayload.deepLink,
-              ...(imageUrl ? { imageUrl } : {}),
             },
           };
 
@@ -117,11 +204,7 @@ export async function dispatchNotification(
             msg.badge = result.unreadCount; // Authoritative badge count
           }
 
-          if (imageUrl) {
-            msg.richContent = { image: imageUrl };
-          }
-
-          return msg;
+          return applyRichPushImage(msg, richPushImageUrl);
         });
 
         const sendResults = await sendPushChunked(pushMessages);
