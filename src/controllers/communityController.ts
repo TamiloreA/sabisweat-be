@@ -22,16 +22,22 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
       return;
     }
 
-    let parsedTags: string[] = [];
-    if (Array.isArray(tags)) {
-      parsedTags = tags.map((t: any) => String(t).trim()).filter(Boolean);
-    } else if (Array.isArray(tag)) {
-      parsedTags = tag.map((t: any) => String(t).trim()).filter(Boolean);
-    } else if (typeof tags === 'string' && tags.trim()) {
-      parsedTags = [tags.trim()];
-    } else if (typeof tag === 'string' && tag.trim()) {
-      parsedTags = [tag.trim()];
-    }
+    const extractStrings = (value: unknown): string[] => {
+      if (Array.isArray(value)) {
+        return value
+          .filter((t): t is string => typeof t === 'string')
+          .map((t) => t.trim())
+          .filter(Boolean);
+      }
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed ? [trimmed] : [];
+      }
+      return [];
+    };
+
+    const parsedFromTags = extractStrings(tags);
+    const parsedTags = parsedFromTags.length > 0 ? parsedFromTags : extractStrings(tag);
 
     const post = await communityService.createPost(
       {

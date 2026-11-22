@@ -835,12 +835,14 @@ function extractPostTagValues(post: any): {
   inlineHashtags: string[];
 } {
   const storedRaw: string[] = [];
-  if (Array.isArray(post.tags) && post.tags.length > 0) {
+  if (Array.isArray(post.tags)) {
     for (const t of post.tags) {
-      const cleaned = String(t || '').replace(/^#+\s*/, '').trim();
+      if (typeof t !== 'string') continue;
+      const cleaned = t.replace(/^#+\s*/, '').trim();
       if (cleaned) storedRaw.push(cleaned);
     }
-  } else if (typeof post.tag === 'string' && post.tag.trim()) {
+  }
+  if (storedRaw.length === 0 && typeof post.tag === 'string' && post.tag.trim()) {
     for (const t of post.tag.split(/[,;]/)) {
       const cleaned = t.replace(/^#+\s*/, '').trim();
       if (cleaned) storedRaw.push(cleaned);

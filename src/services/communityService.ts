@@ -157,11 +157,35 @@ async function uploadImages(postId: string, imagesBase64: string[]): Promise<str
   return urls;
 }
 
+function extractNormalizedTags(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((t): t is string => typeof t === 'string')
+      .map((t) => t.trim())
+      .filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  return [];
+}
+
+function normalizeCreatePostTags(tagInput: unknown, tagsInput: unknown): string[] {
+  const fromTags = extractNormalizedTags(tagsInput);
+  if (fromTags.length > 0) return fromTags;
+  return extractNormalizedTags(tagInput);
+}
+
 function resolvePostTags(post: any): { tag?: string; tags?: string[] } {
   let tags: string[] = [];
-  if (Array.isArray(post.tags) && post.tags.length > 0) {
-    tags = post.tags.map((t: any) => String(t).trim()).filter(Boolean);
-  } else if (typeof post.tag === 'string' && post.tag.trim()) {
+  if (Array.isArray(post.tags)) {
+    tags = post.tags
+      .filter((t: unknown): t is string => typeof t === 'string')
+      .map((t: string) => t.trim())
+      .filter(Boolean);
+  }
+  if (tags.length === 0 && typeof post.tag === 'string' && post.tag.trim()) {
     tags = post.tag.split(',').map((t: string) => t.trim()).filter(Boolean);
   }
   return {
@@ -210,17 +234,8 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
 
   const imagesUrl = [...(input.imagesUrl ?? []).filter(Boolean), ...uploadedUrls];
 
-  let tagsList: string[] = [];
-  if (Array.isArray(input.tags)) {
-    tagsList = input.tags.map((t: any) => String(t).trim()).filter(Boolean);
-  } else if (Array.isArray(input.tag)) {
-    tagsList = input.tag.map((t: any) => String(t).trim()).filter(Boolean);
-  } else if (typeof input.tag === 'string' && input.tag.trim()) {
-    tagsList = [input.tag.trim()];
-  } else if (typeof input.tags === 'string' && (input.tags as any).trim()) {
-    tagsList = [(input.tags as any).trim()];
-  }
-  const primaryTag = tagsList[0] || '';
+  const tagsList = normalizeCreatePostTags(input.tag, input.tags);
+  const primaryTag: string | null = tagsList[0] ?? null;
 
   const basePayload: Record<string, any> = {
     id: postId,
@@ -233,6 +248,7 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
     club_id: (input.clubId && input.clubId.trim() !== '') ? input.clubId : null,
   };
 
+  let includeTagsColumn = true;
   let insertRes = await supabase
     .from(POSTS_TABLE)
     .insert({ ...basePayload, tags: tagsList })
@@ -240,6 +256,7 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
     .single();
 
   if (insertRes.error && insertRes.error.message?.includes('tags')) {
+    includeTagsColumn = false;
     insertRes = await supabase
       .from(POSTS_TABLE)
       .insert(basePayload)
@@ -253,7 +270,26 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
     if (insertRes.error.message?.includes('user_id')) delete fallbackPayload.user_id;
     insertRes = await supabase
       .from(POSTS_TABLE)
-      .insert(tagsList.length > 0 ? { ...fallbackPayload, tags: tagsList } : fallbackPayload)
+      .insert(includeTagsColumn ? { ...fallbackPayload, tags: tagsList } : fallbackPayload)
+      .select()
+      .single();
+  }
+
+  if (
+    insertRes.error &&
+    insertRes.error.code === '23502' &&
+    primaryTag === null &&
+    insertRes.error.message?.includes('tag')
+  ) {
+    // Legacy schema fallback if NOT NULL on tag has not yet been dropped via migration 037
+    const emptyTagPayload: Record<string, any> = {
+      ...basePayload,
+      tag: '',
+      ...(includeTagsColumn ? { tags: tagsList } : {}),
+    };
+    insertRes = await supabase
+      .from(POSTS_TABLE)
+      .insert(emptyTagPayload)
       .select()
       .single();
   }
@@ -274,6 +310,19 @@ export async function createPost(input: CreatePostInput, author: AuthClaims): Pr
       .insert(commPayload)
       .select()
       .single();
+
+    if (
+      insertRes.error &&
+      insertRes.error.code === '23502' &&
+      primaryTag === null &&
+      insertRes.error.message?.includes('tag')
+    ) {
+      insertRes = await supabase
+        .from('community_posts')
+        .insert({ ...commPayload, tag: '' })
+        .select()
+        .single();
+    }
   }
 
   if (insertRes.error) throw insertRes.error;

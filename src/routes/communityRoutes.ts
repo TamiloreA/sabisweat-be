@@ -116,14 +116,14 @@ router.get('/feeds', requireAuth, getFeed);
  *                 type: array
  *                 items:
  *                   type: string
- *                 description: "List of tags (e.g. ['General', 'Fitness']) or single string"
- *                 example: ["General", "Fitness"]
+ *                 description: "Optional list of tags (e.g. ['fitness', 'running']) or single string. Omit or leave empty for untagged posts."
+ *                 example: ["fitness", "running"]
  *               tags:
  *                 type: array
  *                 items:
  *                   type: string
- *                 description: "List of tags (alias for tag)"
- *                 example: ["General", "Fitness"]
+ *                 description: "Optional list of tags (alias for tag). Omit or leave empty for untagged posts."
+ *                 example: ["fitness", "running"]
  *               imagesUrl:
  *                 type: array
  *                 items:
