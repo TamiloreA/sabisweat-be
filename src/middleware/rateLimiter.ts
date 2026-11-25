@@ -58,3 +58,24 @@ export const searchRateLimiter = rateLimit({
   legacyHeaders: false,
   validate: { xForwardedForHeader: false, keyGeneratorIpFallback: false },
 });
+
+/**
+ * Rate limiter for public unauthenticated share-preview endpoint
+ * 120 requests per minute per IP
+ */
+export const publicSharePreviewRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120,
+  handler: (_req, res, _next, options) => {
+    const retryAfter = Math.ceil(options.windowMs / 1000);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Retry-After', String(retryAfter));
+    res.status(429).json({
+      error: 'RATE_LIMITED',
+      message: 'Too many requests. Please try again shortly.',
+    });
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false },
+});

@@ -28,6 +28,7 @@ import weeklyReportRoutes from './routes/weeklyReportRoutes';
 import rewardRoutes from './routes/rewardRoutes';
 import partnerRoutes from './routes/partnerRoutes';
 import partnerPortalRoutes from './routes/partnerPortalRoutes';
+import publicRoutes from './routes/publicRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { apiRateLimiter } from './middleware/rateLimiter';
 
@@ -143,6 +144,9 @@ app.use('/api/v1/partner-portal', partnerPortalRoutes);
 app.use('/admin/challenges', adminChallengeRoutes);
 app.use('/v1/admin/challenges', adminChallengeRoutes);
 app.use('/api/v1/admin/challenges', adminChallengeRoutes);
+
+// Public read-only endpoints (Open Graph / deep-link previews)
+app.use('/api/v1/public', publicRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', message: 'SabiSweat API is running' });
