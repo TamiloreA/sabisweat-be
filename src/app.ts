@@ -12,6 +12,7 @@ import pointsRoutes from './routes/pointsRoutes';
 import pushRoutes from './routes/pushRoutes';
 import communityRoutes from './routes/communityRoutes';
 import newsRoutes from './routes/newsRoutes';
+import triviaRoutes from './routes/triviaRoutes';
 import streaksRoutes from './routes/streaksRoutes';
 import challengeRoutes from './routes/challengeRoutes';
 import versionRoutes from './routes/versionRoutes';
@@ -82,6 +83,10 @@ app.use('/api/v1/community', communityRoutes);
 // News — also at root to match the mobile app's existing paths
 app.use('/news', newsRoutes);
 app.use('/api/v1/news', newsRoutes);
+
+// Weekly Trivia (News tab) — mounted at root and /api/v1
+app.use('/trivia', triviaRoutes);
+app.use('/api/v1/trivia', triviaRoutes);
 
 // Streaks — also at root to match the mobile app's existing paths
 app.use('/streaks', streaksRoutes);
