@@ -292,6 +292,15 @@ const ISO_TO_COUNTRY_NAME: Record<string, string> = {
   IT: 'Italy',
   NL: 'Netherlands',
   IE: 'Ireland',
+  RW: 'Rwanda',
+  MA: 'Morocco',
+  CZ: 'Czechia',
+  PT: 'Portugal',
+  DK: 'Denmark',
+  SE: 'Sweden',
+  CN: 'China',
+  HK: 'Hong Kong',
+  MO: 'Macau',
 };
 
 const COUNTRY_NAME_TO_ISO: Record<string, string> = {
@@ -330,6 +339,16 @@ const COUNTRY_NAME_TO_ISO: Record<string, string> = {
   italy: 'IT',
   netherlands: 'NL',
   ireland: 'IE',
+  rwanda: 'RW',
+  morocco: 'MA',
+  czechia: 'CZ',
+  'czech republic': 'CZ',
+  portugal: 'PT',
+  denmark: 'DK',
+  sweden: 'SE',
+  china: 'CN',
+  'hong kong': 'HK',
+  macau: 'MO',
 };
 
 /**
@@ -545,15 +564,16 @@ export function selectDistanceEquivalent(
   }
 
   if (!chosen) {
-    // 2. Local first: if any eligible entry matches the member's country, pick from those
+    // 2. International first: prefer eligible entries outside the member's country before local ones
     const normalizedCountry = countryCode ? countryCode.trim().toUpperCase() : null;
-    const localEligible = normalizedCountry
-      ? eligible.filter((e) =>
-          (e.country_codes || []).some((c) => c.trim().toUpperCase() === normalizedCountry)
+    const internationalEligible = normalizedCountry
+      ? eligible.filter(
+          (e) =>
+            !(e.country_codes || []).some((c) => c.trim().toUpperCase() === normalizedCountry)
         )
-      : [];
+      : eligible;
 
-    let pool = localEligible.length > 0 ? localEligible : eligible;
+    let pool = internationalEligible.length > 0 ? internationalEligible : eligible;
 
     // 3. Skip the entry shown in the member's previous report, unless it is the only one eligible
     if (previousEquivalentId && pool.length > 1) {

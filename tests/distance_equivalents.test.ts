@@ -119,29 +119,43 @@ describe('Distance Equivalents Engine', () => {
     });
   });
 
-  describe('Worked examples & selection rules', () => {
-    it('London (GB), 60.6 km -> 1.8× English Channel at its narrowest (local first, Tower Bridge >30× excluded)', () => {
-      const result = selectDistanceEquivalent({
+  describe('Selection rules (international first, fallback to local)', () => {
+    it('prefers international entries over local entries when both are eligible', () => {
+      const lagosResult = selectDistanceEquivalent({
+        userId: 'user-lagos',
+        weekStartDate: '2026-11-21',
+        distanceMeters: 21400,
+        countryCode: 'NG',
+        entries: LAUNCH_DISTANCE_EQUIVALENTS,
+      });
+      expect(lagosResult).not.toBeNull();
+      expect(lagosResult!.countryCodes).not.toContain('NG');
+      expect(lagosResult!.multiplier).toBeGreaterThanOrEqual(1);
+      expect(lagosResult!.multiplier).toBeLessThanOrEqual(30);
+
+      const londonResult = selectDistanceEquivalent({
         userId: 'user-london',
         weekStartDate: '2026-11-21',
         distanceMeters: 60600,
         countryCode: 'GB',
         entries: LAUNCH_DISTANCE_EQUIVALENTS,
       });
-      expect(result).not.toBeNull();
-      expect(result?.id).toBe('english_channel_narrowest');
-      expect(result?.displayMultiplier).toBe('1.8×');
-      expect(result?.flagEmoji).toBe('🇬🇧 🇫🇷');
-      expect(result?.placeLabel).toBe('Dover to Calais');
+      expect(londonResult).not.toBeNull();
+      expect(londonResult!.countryCodes).not.toContain('GB');
     });
 
-    it('Lagos (NG), 21.4 km -> Lekki-Ikoyi (15×) or Third Mainland (1.8×), and avoids repeating previous week', () => {
+    it('falls back to local entries when no international entry is eligible', () => {
+      const onlyLocalEntries: DistanceEquivalentConfig[] = LAUNCH_DISTANCE_EQUIVALENTS.map((e) => ({
+        ...e,
+        active: e.country_codes.includes('NG'),
+      }));
+
       const week1 = selectDistanceEquivalent({
         userId: 'user-lagos',
         weekStartDate: '2026-11-14',
         distanceMeters: 21400,
         countryCode: 'NG',
-        entries: LAUNCH_DISTANCE_EQUIVALENTS,
+        entries: onlyLocalEntries,
       });
       expect(week1).not.toBeNull();
       expect(['lekki_ikoyi_link_bridge', 'third_mainland_bridge']).toContain(week1!.id);
@@ -151,25 +165,12 @@ describe('Distance Equivalents Engine', () => {
         weekStartDate: '2026-11-21',
         distanceMeters: 21400,
         countryCode: 'NG',
-        entries: LAUNCH_DISTANCE_EQUIVALENTS,
+        entries: onlyLocalEntries,
         previousEquivalentId: week1!.id,
       });
       expect(week2).not.toBeNull();
       expect(['lekki_ikoyi_link_bridge', 'third_mainland_bridge']).toContain(week2!.id);
       expect(week2!.id).not.toBe(week1!.id);
-    });
-
-    it('Doha (QA), 60.6 km -> 8.6× Doha Corniche', () => {
-      const result = selectDistanceEquivalent({
-        userId: 'user-doha',
-        weekStartDate: '2026-11-21',
-        distanceMeters: 60600,
-        countryCode: 'QA',
-        entries: LAUNCH_DISTANCE_EQUIVALENTS,
-      });
-      expect(result?.id).toBe('doha_corniche');
-      expect(result?.displayMultiplier).toBe('8.6×');
-      expect(result?.placeLabel).toBe('Doha, Qatar');
     });
 
     it('Toronto (CA), 60.6 km -> picks an eligible global entry with 1 <= multiplier <= 30', () => {
@@ -219,7 +220,9 @@ describe('Distance Equivalents Engine', () => {
         entries: updatedEntries,
         pinnedEquivalentId: 'third_mainland_bridge',
       });
-      expect(afterDeactivate?.id).toBe('lekki_ikoyi_link_bridge');
+      expect(afterDeactivate).not.toBeNull();
+      expect(afterDeactivate?.id).not.toBe('third_mainland_bridge');
+      expect(afterDeactivate?.countryCodes).not.toContain('NG');
     });
 
     it('falls back to compact card when image_url is null, and uses photo card when https image_url is set', () => {
@@ -229,6 +232,7 @@ describe('Distance Equivalents Engine', () => {
         distanceMeters: 60600,
         countryCode: 'QA',
         entries: LAUNCH_DISTANCE_EQUIVALENTS,
+        pinnedEquivalentId: 'doha_corniche',
       });
       expect(withNullImg?.card).toBe('compact');
       expect(withNullImg?.imageUrl).toBeNull();
@@ -243,6 +247,7 @@ describe('Distance Equivalents Engine', () => {
             ? { ...e, image_url: 'https://cdn.sabisweat.com/equivalents/doha-corniche.jpg' }
             : e
         ),
+        pinnedEquivalentId: 'doha_corniche',
       });
       expect(withHttpsImg?.card).toBe('photo');
       expect(withHttpsImg?.imageUrl).toBe('https://cdn.sabisweat.com/equivalents/doha-corniche.jpg');
