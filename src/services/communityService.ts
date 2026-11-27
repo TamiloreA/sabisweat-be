@@ -31,6 +31,7 @@ import {
   handleClubPostEvent,
   handleJoinClubRequestEvent,
   handleJoinClubApprovedEvent,
+  handleClubPendingApprovalEvent,
   handleClubEventCreatedEvent,
   handlePostLikeEvent,
   handlePostCommentEvent,
@@ -1166,6 +1167,10 @@ export async function createClub(input: CreateClubInput, author: AuthClaims): Pr
 
   if (memberError) throw memberError;
 
+  handleClubPendingApprovalEvent(clubId, author.sub).catch((err) =>
+    console.warn('[communityService] Failed to notify admins of pending club:', err)
+  );
+
   return {
     id: clubData.id,
     clubId: clubData.tag || clubData.id,
@@ -1584,7 +1589,7 @@ function mapRpcJoinError(errorCode: string, message: string): never {
     case 'INVALID_CODE':
       throw { status: 400, message: message || 'Invalid club code' };
     case 'ALREADY_MEMBER':
-      throw { status: 409, message: message || 'User is already a member' };
+      throw { status: 409, message: "You're already a member of this club" };
     case 'REQUEST_PENDING':
       throw { status: 409, message: message || 'Join request is already pending' };
     case 'REQUEST_APPROVED':
@@ -1660,7 +1665,7 @@ export async function requestJoinClub(
     throw { status: 403, message: 'This club is not open for joining yet' };
   }
   if (memberRes.data) {
-    throw { status: 409, message: 'User is already a member' };
+    throw { status: 409, message: "You're already a member of this club" };
   }
 
   // Code bypass path

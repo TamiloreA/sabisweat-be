@@ -1193,6 +1193,88 @@ export async function handleJoinClubApprovedEvent(clubId: string, targetUserId: 
   });
 }
 
+function getConfiguredAdminEmails(): string[] {
+  const raw = process.env.ADMIN_EMAILS || '';
+  return Array.from(
+    new Set(
+      raw
+        .split(',')
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+/**
+ * Dispatches notification when a new club is created and awaits admin approval.
+ * Recipients: Platform admins configured via ADMIN_EMAILS env var.
+ */
+export async function handleClubPendingApprovalEvent(
+  clubId: string,
+  creatorUserId: string
+): Promise<{ notifiedCount: number }> {
+  const adminEmails = getConfiguredAdminEmails();
+  if (adminEmails.length === 0) return { notifiedCount: 0 };
+
+  const { data: club } = await supabase
+    .from(TABLE_CLUBS)
+    .select('id, name, profile_image_url, status')
+    .eq('id', clubId)
+    .maybeSingle();
+
+  if (!club || club.status !== 'pending') return { notifiedCount: 0 };
+
+  const { data: creator } = await supabase
+    .from(TABLE_PROFILES)
+    .select('first_name, last_name, username')
+    .eq('id', creatorUserId)
+    .maybeSingle();
+
+  const creatorName =
+    creator?.username?.trim() ||
+    [creator?.first_name, creator?.last_name].filter(Boolean).join(' ') ||
+    'A mover';
+
+  const { data: adminProfiles } = await supabase
+    .from(TABLE_PROFILES)
+    .select('id, email')
+    .in('email', adminEmails);
+
+  const adminUserIds = new Set<string>(
+    (adminProfiles || []).map((p: any) => p.id).filter(Boolean)
+  );
+
+  if (adminUserIds.size === 0) return { notifiedCount: 0 };
+
+  const payload = notificationTemplates.clubPendingApproval(
+    clubId,
+    club.name || 'New Club',
+    creatorName,
+    club.profile_image_url || undefined
+  );
+
+  let count = 0;
+  for (const adminId of adminUserIds) {
+    const idempotencyKey = `club_pending_approval:${clubId}:${adminId}`;
+    const already = await hasNotification(adminId, idempotencyKey);
+    if (already) continue;
+
+    await dispatchNotification({
+      userId: adminId,
+      type: 'admin_club_pending_approval',
+      title: payload.title,
+      body: payload.body,
+      imageUrl: payload.imageUrl,
+      data: payload.data,
+      channel: 'push',
+      idempotencyKey,
+    });
+    count++;
+  }
+
+  return { notifiedCount: count };
+}
+
 /**
  * Dispatches notification when a club event is scheduled
  * Recipients: Active club members with preference != 'off'

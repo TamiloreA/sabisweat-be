@@ -713,6 +713,95 @@ describe('Community & Clubs Engine Notifications', () => {
       // Requester must NOT be notified
       expect(dispatchSpy).not.toHaveBeenCalledWith(expect.objectContaining({ userId: 'hope-user-id' }));
     });
+
+    it('notifies platform admins from ADMIN_EMAILS when a pending club is created', async () => {
+      const prevAdminEmails = process.env.ADMIN_EMAILS;
+      process.env.ADMIN_EMAILS = 'admin1@sabisweat.com, ADMIN2@sabisweat.com';
+
+      try {
+        jest.spyOn(supabase, 'from').mockImplementation((table: string) => {
+          if (table === 'clubs') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve({
+                      data: {
+                        id: 'club-pending-1',
+                        name: 'Lagos Night Runners',
+                        profile_image_url: 'https://cdn.sabisweat.app/lnr.png',
+                        status: 'pending',
+                      },
+                      error: null,
+                    }),
+                }),
+              }),
+            } as any;
+          }
+          if (table === 'profiles') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve({
+                      data: { first_name: 'Tunde', last_name: 'Bello', username: 'tundeb' },
+                      error: null,
+                    }),
+                }),
+                in: (_col: string, emails: string[]) => {
+                  expect(emails).toEqual(['admin1@sabisweat.com', 'admin2@sabisweat.com']);
+                  return Promise.resolve({
+                    data: [
+                      { id: 'admin-user-1', email: 'admin1@sabisweat.com' },
+                      { id: 'admin-user-2', email: 'admin2@sabisweat.com' },
+                    ],
+                    error: null,
+                  });
+                },
+              }),
+            } as any;
+          }
+          if (table === 'notifications') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => Promise.resolve({ data: null, error: null }),
+                  }),
+                }),
+              }),
+            } as any;
+          }
+          return {} as any;
+        });
+
+        const res = await eventService.handleClubPendingApprovalEvent('club-pending-1', 'creator-1');
+
+        expect(res.notifiedCount).toBe(2);
+        expect(dispatchSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            userId: 'admin-user-1',
+            type: 'admin_club_pending_approval',
+            title: 'New Club Pending Approval',
+            body: 'tundeb created "Lagos Night Runners" and it\'s waiting for admin approval.',
+            channel: 'push',
+          })
+        );
+        expect(dispatchSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            userId: 'admin-user-2',
+            type: 'admin_club_pending_approval',
+            channel: 'push',
+          })
+        );
+      } finally {
+        if (prevAdminEmails === undefined) {
+          delete process.env.ADMIN_EMAILS;
+        } else {
+          process.env.ADMIN_EMAILS = prevAdminEmails;
+        }
+      }
+    });
   });
 
   describe('updateClubNotificationPreference service method', () => {

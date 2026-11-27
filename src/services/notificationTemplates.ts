@@ -737,4 +737,28 @@ export const notificationTemplates = {
       },
     };
   },
+
+  /**
+   * 9. Club Pending Admin Approval
+   * Sent to platform admins (configured via ADMIN_EMAILS) when a user creates a new club.
+   */
+  clubPendingApproval(
+    clubId: string,
+    clubName: string,
+    creatorName: string,
+    imageUrl?: string
+  ): NotificationPayloadTemplate {
+    const validImage = sanitizeImageUrl(imageUrl);
+    return {
+      category: PUSH_CATEGORIES.COMMUNITY_UPDATE,
+      title: 'New Club Pending Approval',
+      body: `${creatorName.trim()} created "${clubName.trim()}" and it's waiting for admin approval.`,
+      imageUrl: validImage,
+      data: {
+        type: 'admin_club_pending_approval',
+        clubId,
+        ...(validImage ? { imageUrl: validImage } : {}),
+      },
+    };
+  },
 };
