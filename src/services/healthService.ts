@@ -11,6 +11,7 @@ import {
 } from '../models/userPreferencesModel';
 import { handleStepSyncEvents } from './notificationEventService';
 import { checkAndAwardSabiLevelMilestones } from './sabiLevelService';
+import { resolveWeeklyDistanceEquivalent } from './distanceEquivalentsService';
 
 export interface HealthSyncPayload {
   date: string;
@@ -293,12 +294,13 @@ function calcChangePercent(current: number, previous: number): number {
 export const getWeeklyReport = async (
   userId: string,
   weekStartDate?: string,
-  timezone: string = 'Africa/Lagos'
+  timezone: string = 'Africa/Lagos',
+  deviceRegion?: string
 ): Promise<WeeklyReportData> => {
-  // Fetch step goal and preferences from user's profile
+  // Fetch step goal, country, and preferences from user's profile
   const { data: profile } = await supabase
     .from('profiles')
-    .select('step_goal, preferences')
+    .select('step_goal, preferences, country')
     .eq('id', userId)
     .maybeSingle();
 
@@ -511,6 +513,21 @@ export const getWeeklyReport = async (
     console.warn('[healthService] Error querying weekly badges earned:', err);
   }
 
+  // Resolve distance equivalent from recorded distance in metres (never converted from steps)
+  let distanceEquivalent = null;
+  try {
+    distanceEquivalent = await resolveWeeklyDistanceEquivalent({
+      userId,
+      weekStartDate: resolvedWeekStartDate,
+      distanceMeters: Math.round(totalDistanceKm * 1000),
+      profileCountry: profile?.country ?? null,
+      deviceRegion: deviceRegion ?? null,
+      periodLabel: 'this week',
+    });
+  } catch (err) {
+    console.warn('[healthService] Error resolving weekly distance equivalent:', err);
+  }
+
   return {
     reportingPeriod: {
       weekStartDate: resolvedWeekStartDate,
@@ -545,6 +562,7 @@ export const getWeeklyReport = async (
       dailyAverageSteps,
     },
     badgesEarned,
+    distanceEquivalent,
   };
 };
 

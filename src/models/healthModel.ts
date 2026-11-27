@@ -89,6 +89,25 @@ export interface WeeklyReportBadge {
   badgeIconUrl?: string;
 }
 
+export interface WeeklyReportDistanceEquivalent {
+  id: string;
+  name: string;
+  phrase: string;
+  city: string;
+  countryCodes: string[];
+  placeLabel: string;
+  flagEmoji: string;
+  region: string;
+  distanceM: number;
+  unitDistanceLabel: string;
+  card: 'photo' | 'compact';
+  imageUrl: string | null;
+  multiplier: number;
+  displayMultiplier: string;
+  displayNumericMultiplier: number;
+  sentence: string;
+}
+
 export interface WeeklyReportData {
   reportingPeriod: WeeklyReportReportingPeriod;
   summary: WeeklyReportSummary;
@@ -97,6 +116,7 @@ export interface WeeklyReportData {
   dailyBreakdown: WeeklyReportDailyBreakdown[];
   highlights: WeeklyReportHighlights;
   badgesEarned: WeeklyReportBadge[];
+  distanceEquivalent: WeeklyReportDistanceEquivalent | null;
 }
 
 export interface WeeklyReportResponse {

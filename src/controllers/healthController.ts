@@ -189,10 +189,18 @@ export const getWeeklyReport = async (req: AuthenticatedRequest, res: Response, 
       ? req.query.timezone.trim()
       : 'Africa/Lagos';
 
+    const regionRaw =
+      typeof req.query.region === 'string'
+        ? req.query.region.trim()
+        : typeof req.query.countryCode === 'string'
+          ? req.query.countryCode.trim()
+          : '';
+
     const data = await healthService.getWeeklyReport(
       req.user.id,
       weekStartDateRaw || undefined,
-      timezone
+      timezone,
+      regionRaw || undefined
     );
     res.status(200).json({ status: 'success', success: true, data });
   } catch (error: any) {
