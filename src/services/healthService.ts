@@ -12,6 +12,16 @@ import {
 import { handleStepSyncEvents } from './notificationEventService';
 import { checkAndAwardSabiLevelMilestones } from './sabiLevelService';
 import { resolveWeeklyDistanceEquivalent } from './distanceEquivalentsService';
+import {
+  DEFAULT_STEP_GOAL,
+  getLocalDateInTimezone,
+  getStepGoalHistory,
+  recordStepGoalChange,
+  resolveGoalForDate,
+  resolveUserTimezone,
+} from './stepGoalHistoryService';
+import { evaluateAndAwardAchievements } from './achievementService';
+import { getCurrentStreak } from './streaksService';
 
 export interface HealthSyncPayload {
   date: string;
@@ -30,10 +40,89 @@ function validateAndCapSteps(steps: number): number {
   return Math.min(steps, MAX_STEPS_PER_DAY);
 }
 
+function isMissingColumnError(error: any, columnName: string): boolean {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+  return code === '42703' || message.includes(columnName.toLowerCase());
+}
+
+/**
+ * Resolves the step_goal snapshot to store on a daily_steps row during sync.
+ * Preserves any existing snapshotted goal on historical dates (< localToday)
+ * so re-syncing past step data never overwrites historical targets.
+ */
+async function resolveSyncGoalSnapshots(
+  userId: string,
+  dates: string[],
+  timeZone?: string
+): Promise<{ snapshots: Map<string, number>; resolvedTz: string; localToday: string }> {
+  const uniqueDates = Array.from(new Set(dates.filter(Boolean)));
+  const snapshots = new Map<string, number>();
+  const resolvedTz = await resolveUserTimezone(userId, timeZone);
+  const localToday = getLocalDateInTimezone(resolvedTz);
+  if (uniqueDates.length === 0) return { snapshots, resolvedTz, localToday };
+
+  const [goalHistory, profileRes, existingRowsRes] = await Promise.all([
+    getStepGoalHistory(userId),
+    Promise.resolve()
+      .then(() =>
+        supabase
+          .from('profiles')
+          .select('step_goal')
+          .eq('id', userId)
+          .maybeSingle()
+      )
+      .catch(() => ({ data: null })),
+    Promise.resolve()
+      .then(() =>
+        supabase
+          .from('daily_steps')
+          .select('date, step_goal')
+          .eq('user_id', userId)
+          .in('date', uniqueDates)
+      )
+      .catch(() => ({ data: null, error: null })),
+  ]);
+
+  const fallbackGoal = (profileRes?.data as any)?.step_goal ?? DEFAULT_STEP_GOAL;
+  const existingGoalByDate = new Map<string, number>();
+
+  if (Array.isArray(existingRowsRes?.data)) {
+    for (const row of existingRowsRes.data as any[]) {
+      if (row?.date && typeof row?.step_goal === 'number' && row.step_goal > 0) {
+        existingGoalByDate.set(String(row.date).slice(0, 10), Number(row.step_goal));
+      }
+    }
+  }
+
+  for (const date of uniqueDates) {
+    const existingGoal = existingGoalByDate.get(date) ?? null;
+    // Preserve existing historical snapshot for dates before today; for today or unsnapshotted dates, resolve from history
+    const snapshot =
+      date < localToday && existingGoal !== null
+        ? existingGoal
+        : resolveGoalForDate(date, {
+            daySnapshotGoal: date < localToday ? existingGoal : null,
+            history: goalHistory,
+            fallbackGoal,
+          });
+    snapshots.set(date, snapshot);
+  }
+
+  return { snapshots, resolvedTz, localToday };
+}
+
 export const syncStepData = async (userId: string, payload: HealthSyncPayload, token: string) => {
   const steps = validateAndCapSteps(payload.steps || 0);
   const distance = payload.distanceKm !== undefined ? Number(payload.distanceKm) : (steps * 0.000762);
   const activeCalories = payload.activeCalories !== undefined ? Number(payload.activeCalories) : 0;
+
+  const { snapshots: goalSnapshots, resolvedTz, localToday } = await resolveSyncGoalSnapshots(
+    userId,
+    [payload.date],
+    payload.timeZone
+  );
+  const dayStepGoal = goalSnapshots.get(payload.date);
 
   const updateData: any = {
     user_id: userId,
@@ -41,6 +130,7 @@ export const syncStepData = async (userId: string, payload: HealthSyncPayload, t
     steps,
     distance_km: distance,
     active_calories: activeCalories,
+    ...(dayStepGoal ? { step_goal: dayStepGoal } : {}),
     source: payload.source || 'unknown',
     time_zone: payload.timeZone || 'UTC',
     synced_at: payload.syncedAt || new Date().toISOString(),
@@ -52,13 +142,22 @@ export const syncStepData = async (userId: string, payload: HealthSyncPayload, t
     .from('daily_steps')
     .upsert(updateData, { onConflict: 'user_id,date' });
 
-  // Fallback if active_calories column not yet migrated
-  if (error && (error.code === '42703' || error.message?.includes('active_calories'))) {
-    delete updateData.active_calories;
+  // Fallback if active_calories or step_goal column not yet migrated
+  if (error && (isMissingColumnError(error, 'active_calories') || isMissingColumnError(error, 'step_goal'))) {
+    if (isMissingColumnError(error, 'active_calories')) delete updateData.active_calories;
+    if (isMissingColumnError(error, 'step_goal')) delete updateData.step_goal;
     const retry = await client
       .from('daily_steps')
       .upsert(updateData, { onConflict: 'user_id,date' });
     error = retry.error;
+    if (error && (isMissingColumnError(error, 'active_calories') || isMissingColumnError(error, 'step_goal'))) {
+      delete updateData.active_calories;
+      delete updateData.step_goal;
+      const retry2 = await client
+        .from('daily_steps')
+        .upsert(updateData, { onConflict: 'user_id,date' });
+      error = retry2.error;
+    }
   }
 
   if (error) {
@@ -66,9 +165,16 @@ export const syncStepData = async (userId: string, payload: HealthSyncPayload, t
     throw { status: 500, error: 'server_error', message: 'Failed to sync step data' };
   }
 
-  // Asynchronously evaluate business notification events (milestones, streak completion, challenges)
-  handleStepSyncEvents(userId, payload.date, steps, payload.timeZone).catch((err) => {
-    console.warn('[healthService] Error processing step sync notification events:', err);
+  // Only fire daily goal celebrations / reminders for the user's current local day
+  if (payload.date === localToday) {
+    handleStepSyncEvents(userId, payload.date, steps, resolvedTz).catch((err) => {
+      console.warn('[healthService] Error processing step sync notification events:', err);
+    });
+  }
+
+  // Asynchronously evaluate & award eligible achievements using historical per-day goals
+  evaluateAndAwardAchievements(userId, resolvedTz).catch((err) => {
+    console.warn('[healthService] Error evaluating achievements on step sync:', err);
   });
 
   // Asynchronously evaluate Sabi Level milestones
@@ -85,16 +191,25 @@ export const syncStepDataBatch = async (
   token: string,
   platform?: string
 ) => {
+  const latestTz = payloads[payloads.length - 1]?.timeZone;
+  const { snapshots: goalSnapshots, resolvedTz, localToday } = await resolveSyncGoalSnapshots(
+    userId,
+    payloads.map((p) => p.date),
+    latestTz
+  );
+
   const records = payloads.map(payload => {
     const steps = validateAndCapSteps(payload.steps || 0);
     const distance = payload.distanceKm !== undefined ? Number(payload.distanceKm) : (steps * 0.000762);
     const activeCalories = payload.activeCalories !== undefined ? Number(payload.activeCalories) : 0;
+    const dayStepGoal = goalSnapshots.get(payload.date);
     return {
       user_id: userId,
       date: payload.date,
       steps,
       distance_km: distance,
       active_calories: activeCalories,
+      ...(dayStepGoal ? { step_goal: dayStepGoal } : {}),
       source: payload.source || platform || 'unknown',
       time_zone: payload.timeZone || 'UTC',
       synced_at: payload.syncedAt || new Date().toISOString(),
@@ -107,16 +222,27 @@ export const syncStepDataBatch = async (
     .from('daily_steps')
     .upsert(records, { onConflict: 'user_id,date' });
 
-  // Fallback if active_calories column not yet migrated
-  if (error && (error.code === '42703' || error.message?.includes('active_calories'))) {
-    const fallbackRecords = records.map(r => {
-      const { active_calories, ...rest } = r;
-      return rest;
-    });
+  // Fallback if active_calories or step_goal column not yet migrated
+  if (error && (isMissingColumnError(error, 'active_calories') || isMissingColumnError(error, 'step_goal'))) {
+    const stripCols = (recs: any[], dropCal: boolean, dropGoal: boolean) =>
+      recs.map((r) => {
+        const copy = { ...r };
+        if (dropCal) delete copy.active_calories;
+        if (dropGoal) delete copy.step_goal;
+        return copy;
+      });
+    const dropCal = isMissingColumnError(error, 'active_calories');
+    const dropGoal = isMissingColumnError(error, 'step_goal');
     const retry = await client
       .from('daily_steps')
-      .upsert(fallbackRecords, { onConflict: 'user_id,date' });
+      .upsert(stripCols(records, dropCal, dropGoal), { onConflict: 'user_id,date' });
     error = retry.error;
+    if (error && (isMissingColumnError(error, 'active_calories') || isMissingColumnError(error, 'step_goal'))) {
+      const retry2 = await client
+        .from('daily_steps')
+        .upsert(stripCols(records, true, true), { onConflict: 'user_id,date' });
+      error = retry2.error;
+    }
   }
 
   if (error) {
@@ -124,11 +250,16 @@ export const syncStepDataBatch = async (
     throw { status: 500, error: 'server_error', message: 'Failed to sync batch data' };
   }
 
-  // Asynchronously evaluate business notification events for the latest record
+  // Asynchronously evaluate business notification events (for localToday only) & achievements for synced activity
   if (records.length > 0) {
-    const latest = records[records.length - 1];
-    handleStepSyncEvents(userId, latest.date, latest.steps, latest.time_zone).catch((err) => {
-      console.warn('[healthService] Error processing batch step sync notification events:', err);
+    const todayRecord = records.find((r) => r.date === localToday);
+    if (todayRecord) {
+      handleStepSyncEvents(userId, todayRecord.date, todayRecord.steps, resolvedTz).catch((err) => {
+        console.warn('[healthService] Error processing batch step sync notification events:', err);
+      });
+    }
+    evaluateAndAwardAchievements(userId, resolvedTz).catch((err) => {
+      console.warn('[healthService] Error evaluating achievements on batch step sync:', err);
     });
   }
 
@@ -234,17 +365,25 @@ export const getHealthHistoryAll = async (userId: string, token: string): Promis
   };
 };
 
-export const updateStepGoal = async (userId: string, stepGoal: number, token: string) => {
-  const { error } = await getUserSupabase(token)
-    .from('profiles')
-    .update({ step_goal: stepGoal })
-    .eq('id', userId);
-
-  if (error) {
-    throw { status: 500, error: 'server_error', message: 'Failed to update step goal' };
+export const updateStepGoal = async (
+  userId: string,
+  stepGoal: number,
+  token: string,
+  timeZone?: string,
+  effectiveDate?: string
+) => {
+  // Snapshot any legitimately earned longest streak under the existing goal BEFORE changing goals
+  try {
+    await getCurrentStreak(userId, timeZone);
+  } catch {
+    // Non-fatal: goal update must still proceed
   }
 
-  return { stepGoal, updatedAt: new Date().toISOString() };
+  return recordStepGoalChange(userId, stepGoal, {
+    token,
+    timeZone,
+    effectiveDate,
+  });
 };
 
 export const getTodaySteps = async (userId: string, token: string) => {
@@ -349,25 +488,46 @@ export const getWeeklyReport = async (
     daysElapsed = 7;
   }
 
-  // Fetch daily_steps for the reporting week
-  const { data: currentRecords, error: currentError } = await supabase
-    .from('daily_steps')
-    .select('date, steps, distance_km, active_calories')
-    .eq('user_id', userId)
-    .gte('date', resolvedWeekStartDate)
-    .lte('date', weekEndDate);
+  // Fetch daily_steps (including per-day goal snapshot) and step goal history for the reporting week
+  const [goalHistory, currentStepsInitial] = await Promise.all([
+    getStepGoalHistory(userId),
+    supabase
+      .from('daily_steps')
+      .select('date, steps, distance_km, active_calories, step_goal')
+      .eq('user_id', userId)
+      .gte('date', resolvedWeekStartDate)
+      .lte('date', weekEndDate),
+  ]);
+
+  let currentRecords: any[] | null = currentStepsInitial.data;
+  let currentError: any = currentStepsInitial.error;
+
+  if (currentError && isMissingColumnError(currentError, 'step_goal')) {
+    const fallback = await supabase
+      .from('daily_steps')
+      .select('date, steps, distance_km, active_calories')
+      .eq('user_id', userId)
+      .gte('date', resolvedWeekStartDate)
+      .lte('date', weekEndDate);
+    currentRecords = fallback.data;
+    currentError = fallback.error;
+  }
 
   if (currentError) {
     console.error('getWeeklyReport currentRecords error:', currentError);
     throw { status: 500, error: 'server_error', message: 'Failed to fetch weekly records' };
   }
 
-  const currentMap = new Map<string, { steps: number; distanceKm: number; activeCalories: number }>();
+  const currentMap = new Map<
+    string,
+    { steps: number; distanceKm: number; activeCalories: number; stepGoal: number | null }
+  >();
   for (const r of currentRecords ?? []) {
     currentMap.set(r.date, {
       steps: r.steps || 0,
       distanceKm: Number(r.distance_km || 0),
       activeCalories: Number(r.active_calories || 0),
+      stepGoal: typeof r.step_goal === 'number' && r.step_goal > 0 ? Number(r.step_goal) : null,
     });
   }
 
@@ -381,8 +541,18 @@ export const getWeeklyReport = async (
     const date = addDays(resolvedWeekStartDate, i);
     const dayDate = new Date(date + 'T00:00:00Z');
     const dayIdx = dayDate.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
-    const rec = currentMap.get(date) || { steps: 0, distanceKm: 0, activeCalories: 0 };
-    const isGoalMet = rec.steps >= dailyGoalSteps;
+    const rec = currentMap.get(date) || {
+      steps: 0,
+      distanceKm: 0,
+      activeCalories: 0,
+      stepGoal: null,
+    };
+    const dayGoal = resolveGoalForDate(date, {
+      daySnapshotGoal: rec.stepGoal,
+      history: goalHistory,
+      fallbackGoal: dailyGoalSteps,
+    });
+    const isGoalMet = rec.steps >= dayGoal;
 
     const dayItem: WeeklyReportDailyBreakdown = {
       date,
@@ -390,6 +560,7 @@ export const getWeeklyReport = async (
       steps: rec.steps,
       distanceKm: Math.round(rec.distanceKm * 10) / 10,
       activeCalories: Math.round(rec.activeCalories),
+      stepGoal: dayGoal,
       isGoalMet,
     };
 

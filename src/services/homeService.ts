@@ -2,9 +2,15 @@ import { supabase } from '../config/database';
 import { mergeWithDefaultPreferences } from '../models/userPreferencesModel';
 import { mapProfileToUserProfile } from './userService';
 import type { ProfileRow } from '../models/onboardingModel';
+import {
+  getApplicableGoalForDate,
+  getLocalDateInTimezone,
+  resolveUserTimezone,
+} from './stepGoalHistoryService';
 
-export const getHomeSummary = async (userId: string, token: string) => {
-  const today = new Date().toISOString().split('T')[0];
+export const getHomeSummary = async (userId: string, token: string, timeZone?: string) => {
+  const resolvedTz = await resolveUserTimezone(userId, timeZone);
+  const today = getLocalDateInTimezone(resolvedTz);
   
   // 1. Fetch complete profile for user info, step_goal, and preferences
   const { data: profile, error: profileError } = await supabase
@@ -29,7 +35,7 @@ export const getHomeSummary = async (userId: string, token: string) => {
 
   const stepsToday = dailySteps?.steps || 0;
   const distanceTodayKm = dailySteps?.distance_km || 0;
-  const stepGoal = profile.step_goal || 10000;
+  const stepGoal = await getApplicableGoalForDate(userId, today, profile.step_goal ?? 10000);
   
   // 3. Fetch 7-day average steps
   const { data: recentSteps } = await supabase

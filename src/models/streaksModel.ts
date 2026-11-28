@@ -3,6 +3,7 @@ export type StreakStatus = 'hit' | 'partial' | 'miss';
 export interface StreakDayData {
   day: string; // YYYY-MM-DD
   steps: number;
+  stepGoal?: number;
   status: StreakStatus;
 }
 
@@ -27,6 +28,7 @@ export interface StreakCalendarDay {
   day: string;
   steps: number;
   distanceKm: number;
+  stepGoal?: number;
   status: StreakStatus;
 }
 

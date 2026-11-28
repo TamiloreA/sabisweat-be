@@ -9,6 +9,7 @@ import { supabase } from '../config/database';
 import { dispatchNotification } from './notificationDispatcher';
 import { notificationTemplates, resolveChallengeNotificationImage } from './notificationTemplates';
 import { getCurrentStreak } from './streaksService';
+import { getApplicableGoalForDate } from './stepGoalHistoryService';
 import { getLeaderboard } from './challengeService';
 import { resolveUserAvatarUrl, resolveStreakNotificationImageUrl } from '../utils/avatarResolver';
 import {
@@ -132,14 +133,8 @@ export async function handleStepSyncEvents(
     goalCompleted: false,
   };
 
-  // 1. Get user step goal
-  const { data: profile } = await supabase
-    .from(TABLE_PROFILES)
-    .select('step_goal')
-    .eq('id', userId)
-    .single();
-
-  const stepGoal = profile?.step_goal || 10000;
+  // 1. Get the step goal applicable on dateStr (preserves historical goals)
+  const stepGoal = await getApplicableGoalForDate(userId, dateStr);
   if (stepGoal <= 0) return result;
 
   const key100 = `step_goal_100:${userId}:${dateStr}`;
@@ -150,7 +145,9 @@ export async function handleStepSyncEvents(
     if (!already100) {
       // Query authoritative streak logic
       try {
-        const streakInfo = await getCurrentStreak(userId);
+        const streakInfo = timeZone
+          ? await getCurrentStreak(userId, timeZone)
+          : await getCurrentStreak(userId);
         const streakDays = streakInfo?.streakDays || 1;
 
         const streakImageUrl = resolveStreakNotificationImageUrl('daily_goal_completed', streakDays);
@@ -284,14 +281,8 @@ export async function processStreakAtRiskJob(now: Date = new Date()): Promise<{ 
       const already = await hasNotification(userId, idempotencyKey);
       if (already) continue;
 
-      // 1. Get profile goal
-      const { data: profile } = await supabase
-        .from(TABLE_PROFILES)
-        .select('step_goal')
-        .eq('id', userId)
-        .single();
-
-      const stepGoal = profile?.step_goal || 10000;
+      // 1. Get effective goal for user's local date
+      const stepGoal = await getApplicableGoalForDate(userId, local.dateStr);
 
       // 2. Get today steps
       const { data: stepRow } = await supabase
@@ -309,7 +300,7 @@ export async function processStreakAtRiskJob(now: Date = new Date()): Promise<{ 
       // Strict Rule 2: User's current streak is greater than or equal to 1
       let streakDays = 0;
       try {
-        const streakInfo = await getCurrentStreak(userId);
+        const streakInfo = await getCurrentStreak(userId, tz);
         streakDays = streakInfo?.streakDays || 0;
       } catch {}
 

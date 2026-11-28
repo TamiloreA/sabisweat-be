@@ -119,10 +119,41 @@ export function getEndOfMonthTimestamp(monthPeriod: string): string {
   return `${monthPeriod}-${String(lastDay).padStart(2, '0')}T23:59:59.000Z`;
 }
 
-export async function getAchievementsSummary(
+export interface AchievementBadgeInsert {
+  user_id: string;
+  category: string;
+  badge_key: string;
+  earned_at: string;
+  progress_value: number;
+  target_value: number;
+  month_period: string | null;
+  metadata: Record<string, any>;
+}
+
+export interface AchievementBadgeUpdate {
+  id: string;
+  earned_at: string;
+  progress_value: number;
+}
+
+export interface AchievementEvaluationResult {
+  summary: AchievementSummaryData;
+  badgesToInsert: AchievementBadgeInsert[];
+  badgesToUpdate: AchievementBadgeUpdate[];
+}
+
+/**
+ * Pure, side-effect-free achievement eligibility evaluation.
+ * - Step milestones & monthly badges use cumulative steps (independent of daily step goal).
+ * - Daily streak badges use historically preserved per-day step goals via streaksService.
+ * - Invite & challenge badges use referral and challenge completion criteria.
+ * - Previously earned badges in user_achievements are permanently retained and never revoked.
+ * Does NOT write to the database; call awardEligibleAchievements() explicitly to persist awards.
+ */
+export async function evaluateAchievements(
   userId: string,
   timezone = 'Africa/Lagos'
-): Promise<AchievementSummaryData> {
+): Promise<AchievementEvaluationResult> {
   const now = new Date();
   const nowIso = now.toISOString();
 
@@ -196,7 +227,7 @@ export async function getAchievementsSummary(
   const streakCrossings = new Map<string, string>();
 
   try {
-    const streakResult = await streaksService.getCurrentStreak(userId);
+    const streakResult = await streaksService.getCurrentStreak(userId, timezone);
     currentStreak = streakResult.streakDays ?? 0;
     longestStreak = streakResult.longestStreakDays ?? 0;
 
@@ -374,10 +405,11 @@ export async function getAchievementsSummary(
     let earnedAt: string | null = null;
     if (earned) {
       const crossedAt = streakCrossings.get(s.id);
-      if (crossedAt) {
-        earnedAt = crossedAt;
-      } else if (existing?.earned_at) {
+      if (existing?.earned_at) {
+        // Preserve originally awarded timestamp; never mutate or revoke legitimately earned streak badges
         earnedAt = existing.earned_at;
+      } else if (crossedAt) {
+        earnedAt = crossedAt;
       } else {
         earnedAt = nowIso;
       }
@@ -393,7 +425,7 @@ export async function getAchievementsSummary(
           month_period: null,
           metadata: { title: s.title, displayValue: s.displayValue },
         });
-      } else if (existing?.id && earnedAt && existing.earned_at !== earnedAt) {
+      } else if (existing?.id && !existing.earned_at && earnedAt) {
         badgesToUpdate.push({
           id: existing.id,
           earned_at: earnedAt,
@@ -573,40 +605,7 @@ export async function getAchievementsSummary(
     }
   }
 
-  // Persist newly earned badges and update any historical badges with corrected timestamps
-  if (badgesToInsert.length > 0 || badgesToUpdate.length > 0) {
-    (async () => {
-      try {
-        if (badgesToInsert.length > 0) {
-          const { error: insertErr } = await supabase
-            .from(ACHIEVEMENTS_TABLE)
-            .insert(badgesToInsert);
-          if (insertErr) {
-            console.warn('[achievementService] Badge insert warning:', insertErr.message || insertErr);
-          }
-        }
-
-        if (badgesToUpdate.length > 0) {
-          await Promise.allSettled(
-            badgesToUpdate.map((b) =>
-              supabase
-                .from(ACHIEVEMENTS_TABLE)
-                .update({
-                  earned_at: b.earned_at,
-                  progress_value: b.progress_value,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('id', b.id)
-            )
-          );
-        }
-      } catch (err) {
-        console.warn('[achievementService] Badge persistence error:', err);
-      }
-    })();
-  }
-
-  return {
+  const summary: AchievementSummaryData = {
     stepMilestones: {
       currentProgress: lifetimeSteps,
       items: stepItems,
@@ -630,4 +629,119 @@ export async function getAchievementsSummary(
       items: completedChallenges,
     },
   };
+
+  return {
+    summary,
+    badgesToInsert,
+    badgesToUpdate,
+  };
+}
+
+/**
+ * Idempotently persists newly earned achievements and timestamp corrections.
+ * - Deduplicates inserts in-memory and handles database unique-index conflicts (23505) safely.
+ * - Never revokes or deletes existing user_achievements records.
+ */
+export async function awardEligibleAchievements(
+  evaluation: Pick<AchievementEvaluationResult, 'badgesToInsert' | 'badgesToUpdate'>
+): Promise<{ insertedCount: number; updatedCount: number }> {
+  let insertedCount = 0;
+  let updatedCount = 0;
+
+  // Deduplicate by (user_id, category, badge_key, month_period)
+  const seenKeys = new Set<string>();
+  const uniqueInserts: AchievementBadgeInsert[] = [];
+  for (const badge of evaluation.badgesToInsert) {
+    const key = `${badge.user_id}:${badge.category}:${badge.badge_key}:${badge.month_period || ''}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      uniqueInserts.push(badge);
+    }
+  }
+
+  if (uniqueInserts.length > 0) {
+    try {
+      const { error: insertErr } = await supabase
+        .from(ACHIEVEMENTS_TABLE)
+        .insert(uniqueInserts);
+
+      if (!insertErr) {
+        insertedCount = uniqueInserts.length;
+      } else if (String(insertErr.code) === '23505') {
+        // Partial conflict under concurrent syncs: insert one-by-one ignoring duplicates
+        for (const badge of uniqueInserts) {
+          const { error: singleErr } = await supabase
+            .from(ACHIEVEMENTS_TABLE)
+            .insert(badge);
+          if (!singleErr) {
+            insertedCount += 1;
+          } else if (String(singleErr.code) !== '23505') {
+            console.warn('[achievementService] Badge insert warning:', singleErr.message || singleErr);
+          }
+        }
+      } else {
+        console.warn('[achievementService] Badge insert warning:', insertErr.message || insertErr);
+      }
+    } catch (err) {
+      console.warn('[achievementService] Badge insert error:', err);
+    }
+  }
+
+  if (evaluation.badgesToUpdate.length > 0) {
+    try {
+      const results = await Promise.allSettled(
+        evaluation.badgesToUpdate.map((b) =>
+          supabase
+            .from(ACHIEVEMENTS_TABLE)
+            .update({
+              earned_at: b.earned_at,
+              progress_value: b.progress_value,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', b.id)
+        )
+      );
+      updatedCount = results.filter((r) => r.status === 'fulfilled').length;
+    } catch (err) {
+      console.warn('[achievementService] Badge update error:', err);
+    }
+  }
+
+  return { insertedCount, updatedCount };
+}
+
+/**
+ * Explicitly evaluates eligibility and persists any newly earned achievements.
+ * Called on real activity events (step sync), NOT during goal updates.
+ */
+export async function evaluateAndAwardAchievements(
+  userId: string,
+  timezone = 'Africa/Lagos'
+): Promise<AchievementEvaluationResult & { insertedCount: number; updatedCount: number }> {
+  const evaluation = await evaluateAchievements(userId, timezone);
+  const { insertedCount, updatedCount } = await awardEligibleAchievements(evaluation);
+  return {
+    ...evaluation,
+    insertedCount,
+    updatedCount,
+  };
+}
+
+/**
+ * Read-only achievements summary endpoint handler.
+ * By default (persistAwards = false), reading or recalculating progress does NOT
+ * automatically award new achievements in the database.
+ */
+export async function getAchievementsSummary(
+  userId: string,
+  timezone = 'Africa/Lagos',
+  options: { persistAwards?: boolean } = {}
+): Promise<AchievementSummaryData> {
+  const evaluation = await evaluateAchievements(userId, timezone);
+
+  if (options.persistAwards) {
+    await awardEligibleAchievements(evaluation);
+  }
+
+  return evaluation.summary;
 }

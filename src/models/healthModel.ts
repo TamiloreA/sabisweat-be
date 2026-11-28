@@ -18,6 +18,7 @@ export interface HealthHistoryItem {
   steps: number;
   distanceKm: number;
   activeCalories: number;
+  stepGoal?: number;
   lastSyncedAt?: string;
   source?: string;
 }
@@ -66,6 +67,7 @@ export interface WeeklyReportDailyBreakdown {
   steps: number;
   distanceKm: number;
   activeCalories: number;
+  stepGoal?: number;
   isGoalMet: boolean;
 }
 

@@ -260,7 +260,17 @@ router.get('/history/all', healthController.getHealthHistoryAll);
  *               stepGoal:
  *                 type: integer
  *                 minimum: 1000
+ *                 maximum: 100000
  *                 example: 10000
+ *               timezone:
+ *                 type: string
+ *                 description: Optional IANA timezone for determining the user's local effective date (defaults to active device timezone or Africa/Lagos)
+ *                 example: "Africa/Lagos"
+ *               effectiveDate:
+ *                 type: string
+ *                 format: date
+ *                 description: Optional effective date (YYYY-MM-DD); defaults to today in the user's local timezone
+ *                 example: "2026-11-28"
  *     responses:
  *       200:
  *         description: Step goal updated successfully

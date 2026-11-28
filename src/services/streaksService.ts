@@ -8,6 +8,14 @@ import {
   StreakDayData,
   StreakStatus,
 } from '../models/streaksModel';
+import {
+  DEFAULT_STEP_GOAL,
+  getLocalDateInTimezone,
+  getStepGoalHistory,
+  persistLongestStreakHighWaterMark,
+  resolveGoalForDate,
+  resolveUserTimezone,
+} from './stepGoalHistoryService';
 
 const PROFILES_TABLE = 'profiles';
 const DAILY_STEPS_TABLE = 'daily_steps';
@@ -17,14 +25,6 @@ const REDEMPTIONS_TABLE = 'life_happens_redemptions';
 export const LIFE_HAPPENS_PASS_COST = 500;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function currentMonthStr(): string {
-  return todayStr().slice(0, 7);
-}
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T00:00:00Z');
@@ -51,31 +51,82 @@ interface ProfileRow {
   life_happens_passes: number;
   last_free_pass_month: string | null;
   points_balance: number | null;
+  longest_streak_days?: number | null;
+}
+
+interface DailyStepEntry {
+  steps: number;
+  distanceKm: number;
+  stepGoal: number | null;
+}
+
+function isMissingColumnError(error: any, columnName: string): boolean {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+  return code === '42703' || message.includes(columnName.toLowerCase());
 }
 
 async function getProfile(userId: string): Promise<ProfileRow> {
-  const { data, error } = await supabase
+  const initial = await supabase
     .from(PROFILES_TABLE)
-    .select('step_goal, finished_onboarded_at, created_at, life_happens_passes, last_free_pass_month, points_balance')
+    .select(
+      'step_goal, finished_onboarded_at, created_at, life_happens_passes, last_free_pass_month, points_balance, longest_streak_days'
+    )
     .eq('id', userId)
     .single();
-  if (error || !data) throw new Error('Profile not found');
-  return data as ProfileRow;
+
+  if (initial.error && isMissingColumnError(initial.error, 'longest_streak_days')) {
+    const fallback = await supabase
+      .from(PROFILES_TABLE)
+      .select(
+        'step_goal, finished_onboarded_at, created_at, life_happens_passes, last_free_pass_month, points_balance'
+      )
+      .eq('id', userId)
+      .single();
+    if (fallback.error || !fallback.data) throw new Error('Profile not found');
+    return fallback.data as ProfileRow;
+  }
+
+  if (initial.error || !initial.data) throw new Error('Profile not found');
+  return initial.data as ProfileRow;
 }
 
-async function getStepsMap(userId: string, from: string, to: string): Promise<Map<string, { steps: number; distanceKm: number }>> {
-  const { data, error } = await supabase
+async function getStepsMap(
+  userId: string,
+  from: string,
+  to: string
+): Promise<Map<string, DailyStepEntry>> {
+  const initial = await supabase
     .from(DAILY_STEPS_TABLE)
-    .select('date, steps, distance_km')
+    .select('date, steps, distance_km, step_goal')
     .eq('user_id', userId)
     .gte('date', from)
     .lte('date', to);
 
+  let rows: any[] | null = initial.data as any[] | null;
+  let error = initial.error;
+
+  if (error && isMissingColumnError(error, 'step_goal')) {
+    const fallback = await supabase
+      .from(DAILY_STEPS_TABLE)
+      .select('date, steps, distance_km')
+      .eq('user_id', userId)
+      .gte('date', from)
+      .lte('date', to);
+    rows = fallback.data as any[] | null;
+    error = fallback.error;
+  }
+
   if (error) throw error;
 
-  const map = new Map<string, { steps: number; distanceKm: number }>();
-  for (const row of data ?? []) {
-    map.set(row.date, { steps: row.steps ?? 0, distanceKm: Number(row.distance_km ?? 0) });
+  const map = new Map<string, DailyStepEntry>();
+  for (const row of rows ?? []) {
+    map.set(row.date, {
+      steps: row.steps ?? 0,
+      distanceKm: Number(row.distance_km ?? 0),
+      stepGoal:
+        typeof row.step_goal === 'number' && row.step_goal > 0 ? Number(row.step_goal) : null,
+    });
   }
   return map;
 }
@@ -94,8 +145,12 @@ async function getRedeemedDates(userId: string): Promise<Set<string>> {
  * Grants the 1 free monthly pass if the current month hasn't been granted yet.
  * Returns the up-to-date pass count.
  */
-async function ensureMonthlyPass(profile: ProfileRow, userId: string): Promise<number> {
-  const month = currentMonthStr();
+async function ensureMonthlyPass(
+  profile: ProfileRow,
+  userId: string,
+  today: string
+): Promise<number> {
+  const month = today.slice(0, 7);
   if (profile.last_free_pass_month === month) {
     return profile.life_happens_passes;
   }
@@ -110,16 +165,36 @@ async function ensureMonthlyPass(profile: ProfileRow, userId: string): Promise<n
   return nextPasses;
 }
 
-export async function getPassBalance(userId: string): Promise<PassBalanceResponse> {
-  const profile = await getProfile(userId);
-  const passes = await ensureMonthlyPass(profile, userId);
+export async function getPassBalance(
+  userId: string,
+  timeZone?: string
+): Promise<PassBalanceResponse> {
+  const [profile, resolvedTz] = await Promise.all([
+    getProfile(userId),
+    resolveUserTimezone(userId, timeZone),
+  ]);
+  const today = getLocalDateInTimezone(resolvedTz);
+  const passes = await ensureMonthlyPass(profile, userId, today);
   return { passes };
 }
 
-export async function getCurrentStreak(userId: string): Promise<CurrentStreakResponse> {
-  const profile = await getProfile(userId);
-  const stepGoal = profile.step_goal ?? 10000;
-  const today = todayStr();
+export async function getCurrentStreak(
+  userId: string,
+  timeZone?: string,
+  asOfDateOverride?: string
+): Promise<CurrentStreakResponse> {
+  const [profile, resolvedTz, goalHistory] = await Promise.all([
+    getProfile(userId),
+    resolveUserTimezone(userId, timeZone),
+    getStepGoalHistory(userId),
+  ]);
+
+  const fallbackGoal = profile.step_goal ?? DEFAULT_STEP_GOAL;
+  const today =
+    asOfDateOverride && DATE_RE.test(asOfDateOverride)
+      ? asOfDateOverride
+      : getLocalDateInTimezone(resolvedTz);
+
   const windowStart = (profile.finished_onboarded_at ?? profile.created_at).slice(0, 10);
   const start = windowStart > today ? today : windowStart;
 
@@ -130,16 +205,27 @@ export async function getCurrentStreak(userId: string): Promise<CurrentStreakRes
 
   const dates = eachDate(start, today);
   const data: StreakDayData[] = dates.map((day) => {
-    const steps = stepsMap.get(day)?.steps ?? 0;
-    return { day, steps, status: statusFor(steps, stepGoal) };
+    const entry = stepsMap.get(day);
+    const steps = entry?.steps ?? 0;
+    const dayGoal = resolveGoalForDate(day, {
+      daySnapshotGoal: entry?.stepGoal ?? null,
+      history: goalHistory,
+      fallbackGoal,
+    });
+    return { day, steps, stepGoal: dayGoal, status: statusFor(steps, dayGoal) };
   });
+
+  const dayStatusMap = new Map<string, StreakStatus>();
+  for (const d of data) {
+    dayStatusMap.set(d.day, d.status);
+  }
 
   const hitDates: string[] = [];
   const missDates: string[] = [];
   const restoredDates: string[] = [];
 
   for (const day of dates) {
-    const status = data.find((d) => d.day === day)!.status;
+    const status = dayStatusMap.get(day)!;
     const isRestored = redeemed.has(day);
     if (isRestored) {
       restoredDates.push(day);
@@ -151,9 +237,9 @@ export async function getCurrentStreak(userId: string): Promise<CurrentStreakRes
     }
   }
 
-  // Longest streak: longest run of hits, where a restored day keeps the
-  // chain alive but does not add to the count.
-  let longestStreakDays = 0;
+  // Longest streak: longest run of hits evaluated against each day's applicable goal,
+  // where a restored day keeps the chain alive without adding to the count.
+  let computedLongestStreak = 0;
   let running = 0;
   for (const day of data) {
     const isRestored = redeemed.has(day.day);
@@ -163,13 +249,20 @@ export async function getCurrentStreak(userId: string): Promise<CurrentStreakRes
     if (isPendingToday) continue;
     if (isHit) {
       running += 1;
-      if (running > longestStreakDays) longestStreakDays = running;
+      if (running > computedLongestStreak) computedLongestStreak = running;
     } else if (isRestored) {
       // preserved, not earned — chain continues
     } else {
       running = 0;
     }
   }
+
+  // Never let longestStreakDays decrease due to a goal change
+  const longestStreakDays = await persistLongestStreakHighWaterMark(
+    userId,
+    computedLongestStreak,
+    profile.longest_streak_days
+  );
 
   // Current streak: walk backwards from today, stop at the first true miss.
   let streakDays = 0;
@@ -188,13 +281,18 @@ export async function getCurrentStreak(userId: string): Promise<CurrentStreakRes
     break; // true miss ends the current streak
   }
 
-  const passes = await ensureMonthlyPass(profile, userId);
+  const passes = await ensureMonthlyPass(profile, userId, today);
+  const todayStepGoal = resolveGoalForDate(today, {
+    daySnapshotGoal: stepsMap.get(today)?.stepGoal ?? null,
+    history: goalHistory,
+    fallbackGoal,
+  });
 
   return {
     asOfDate: today,
     windowStartDate: start,
     windowEndDate: today,
-    stepGoal,
+    stepGoal: todayStepGoal,
     streakDays,
     streakWeeks: Math.floor(streakDays / 7),
     longestStreakDays,
@@ -208,14 +306,27 @@ export async function getCurrentStreak(userId: string): Promise<CurrentStreakRes
   };
 }
 
-export async function getStreakCalendar(userId: string, month: string): Promise<StreakCalendarResponse> {
+export async function getStreakCalendar(
+  userId: string,
+  month: string,
+  timeZone?: string,
+  asOfDateOverride?: string
+): Promise<StreakCalendarResponse> {
   if (!/^\d{4}-\d{2}$/.test(month)) {
     throw new Error('month must be in YYYY-MM format');
   }
 
-  const profile = await getProfile(userId);
-  const stepGoal = profile.step_goal ?? 10000;
-  const today = todayStr();
+  const [profile, resolvedTz, goalHistory] = await Promise.all([
+    getProfile(userId),
+    resolveUserTimezone(userId, timeZone),
+    getStepGoalHistory(userId),
+  ]);
+
+  const fallbackGoal = profile.step_goal ?? DEFAULT_STEP_GOAL;
+  const today =
+    asOfDateOverride && DATE_RE.test(asOfDateOverride)
+      ? asOfDateOverride
+      : getLocalDateInTimezone(resolvedTz);
 
   const start = `${month}-01`;
   const nextMonth = month.slice(5) === '12'
@@ -233,11 +344,17 @@ export async function getStreakCalendar(userId: string, month: string): Promise<
   const data = dates.map((day) => {
     const entry = stepsMap.get(day);
     const steps = entry?.steps ?? 0;
+    const dayGoal = resolveGoalForDate(day, {
+      daySnapshotGoal: entry?.stepGoal ?? null,
+      history: goalHistory,
+      fallbackGoal,
+    });
     return {
       day,
       steps,
       distanceKm: entry?.distanceKm ?? 0,
-      status: statusFor(steps, stepGoal),
+      stepGoal: dayGoal,
+      status: statusFor(steps, dayGoal),
     };
   });
 
@@ -247,9 +364,14 @@ export async function getStreakCalendar(userId: string, month: string): Promise<
     .filter((d) => d.status !== 'hit' && d.day !== today && !redeemed.has(d.day))
     .map((d) => d.day);
 
+  const currentStepGoal = resolveGoalForDate(today, {
+    history: goalHistory,
+    fallbackGoal,
+  });
+
   return {
     month,
-    stepGoal,
+    stepGoal: currentStepGoal,
     streakHitCount: hitDates.length,
     streakMissCount: missDates.length,
     hitDates,
@@ -259,18 +381,27 @@ export async function getStreakCalendar(userId: string, month: string): Promise<
   };
 }
 
-export async function redeemPass(userId: string, date: string): Promise<RedeemPassResponse> {
+export async function redeemPass(
+  userId: string,
+  date: string,
+  timeZone?: string
+): Promise<RedeemPassResponse> {
   if (!DATE_RE.test(date)) {
     throw new Error('date must be YYYY-MM-DD');
   }
 
-  const today = todayStr();
+  const [profile, resolvedTz, goalHistory] = await Promise.all([
+    getProfile(userId),
+    resolveUserTimezone(userId, timeZone),
+    getStepGoalHistory(userId),
+  ]);
+
+  const today = getLocalDateInTimezone(resolvedTz);
   if (date >= today) {
     throw new Error('You can only use a pass on a past day');
   }
 
-  const profile = await getProfile(userId);
-  const stepGoal = profile.step_goal ?? 10000;
+  const fallbackGoal = profile.step_goal ?? DEFAULT_STEP_GOAL;
   const onboarding = (profile.finished_onboarded_at ?? profile.created_at).slice(0, 10);
   if (date < onboarding) {
     throw new Error('That date is before you joined');
@@ -285,12 +416,19 @@ export async function redeemPass(userId: string, date: string): Promise<RedeemPa
     throw new Error('You already used a pass on that day');
   }
 
-  const steps = stepsMap.get(date)?.steps ?? 0;
-  if (steps >= stepGoal) {
+  const entry = stepsMap.get(date);
+  const steps = entry?.steps ?? 0;
+  const dayGoal = resolveGoalForDate(date, {
+    daySnapshotGoal: entry?.stepGoal ?? null,
+    history: goalHistory,
+    fallbackGoal,
+  });
+
+  if (steps >= dayGoal) {
     throw new Error('That day already hit your goal — no pass needed');
   }
 
-  const passes = await ensureMonthlyPass(profile, userId);
+  const passes = await ensureMonthlyPass(profile, userId, today);
   if (passes <= 0) {
     throw new Error('No Life Happens Passes left');
   }

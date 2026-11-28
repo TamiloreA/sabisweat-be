@@ -18,6 +18,7 @@
 
 import { randomUUID } from 'crypto';
 import { supabase } from '../config/database';
+import { getApplicableGoalForDate } from './stepGoalHistoryService';
 import { PUSH_CATEGORIES } from '../models/notificationModel';
 import { dispatchNotification } from './notificationDispatcher';
 import { getPreferences, isPushCategoryEnabled } from './preferenceService';
@@ -385,15 +386,39 @@ async function fetchLiveMemberStepState(
       .single(),
     supabase
       .from(TABLE_DAILY_STEPS)
-      .select('steps, synced_at, updated_at')
+      .select('steps, synced_at, updated_at, step_goal')
       .eq('user_id', userId)
       .eq('date', localDateStr)
       .maybeSingle(),
   ]);
 
-  const goal = profileRes.data?.step_goal || 10000;
+  let stepRowData: any = stepRes.data ?? null;
+  if (
+    stepRes.error &&
+    (stepRes.error.code === '42703' || String(stepRes.error.message || '').includes('step_goal'))
+  ) {
+    const fallbackStepRes = await supabase
+      .from(TABLE_DAILY_STEPS)
+      .select('steps, synced_at, updated_at')
+      .eq('user_id', userId)
+      .eq('date', localDateStr)
+      .maybeSingle();
+    stepRowData = fallbackStepRes.data ?? null;
+  }
+
+  const daySnapshotGoal =
+    stepRowData && typeof stepRowData.step_goal === 'number' && stepRowData.step_goal > 0
+      ? Number(stepRowData.step_goal)
+      : null;
+
+  const goal = await getApplicableGoalForDate(
+    userId,
+    localDateStr,
+    profileRes.data?.step_goal ?? 10000,
+    { daySnapshotGoal }
+  );
   const firstName = profileRes.data?.first_name ?? null;
-  const stepRow = stepRes.data ?? null;
+  const stepRow = stepRowData;
 
   return { firstName, goal, stepRow };
 }

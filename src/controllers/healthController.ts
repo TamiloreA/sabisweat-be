@@ -124,13 +124,31 @@ export const updateStepGoal = async (req: AuthenticatedRequest, res: Response, n
       return;
     }
 
-    const { stepGoal } = req.body;
-    if (!stepGoal || typeof stepGoal !== 'number' || stepGoal < 1000) {
-      res.status(400).json({ success: false, error: 'validation_error', message: 'Valid stepGoal is required (min 1000)' });
+    const { stepGoal, timezone, timeZone, effectiveDate } = req.body;
+    if (!stepGoal || typeof stepGoal !== 'number' || !Number.isFinite(stepGoal) || stepGoal < 1000 || stepGoal > 100000) {
+      res.status(400).json({ success: false, error: 'validation_error', message: 'Valid stepGoal is required (between 1000 and 100000)' });
       return;
     }
 
-    const result = await healthService.updateStepGoal(req.user.id, stepGoal, req.token!);
+    if (effectiveDate !== undefined && (typeof effectiveDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate.trim()))) {
+      res.status(400).json({ success: false, error: 'validation_error', message: 'effectiveDate must be in YYYY-MM-DD format' });
+      return;
+    }
+
+    const resolvedTz =
+      typeof timezone === 'string' && timezone.trim()
+        ? timezone.trim()
+        : typeof timeZone === 'string' && timeZone.trim()
+          ? timeZone.trim()
+          : undefined;
+
+    const result = await healthService.updateStepGoal(
+      req.user.id,
+      stepGoal,
+      req.token!,
+      resolvedTz,
+      typeof effectiveDate === 'string' ? effectiveDate.trim() : undefined
+    );
     res.status(200).json({ success: true, ...result });
   } catch (error: any) {
     if (error.status) {

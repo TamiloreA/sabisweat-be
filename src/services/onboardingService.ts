@@ -4,6 +4,7 @@
  */
 
 import { getUserSupabase, supabase } from '../config/database';
+import { recordInitialStepGoal } from './stepGoalHistoryService';
 import type { ProfileRow } from '../models/onboardingModel';
 import type { OnboardingStatus } from '../models/authModel';
 import { normalizeGender } from '../utils/genderUtils';
@@ -238,6 +239,11 @@ export async function completeOnboarding(userId: string, data: {
     console.error('completeOnboarding error:', error);
     throw { status: 500, error: 'server_error', message: 'Failed to complete onboarding' };
   }
+
+  // Record initial step goal with effective date so historical goals are always preserved
+  recordInitialStepGoal(userId, data.startingGoal).catch((err) => {
+    console.warn('[onboardingService] Failed to record initial step goal history:', err);
+  });
 
   return mapToOnboardingProfile(profile as ProfileRow);
 }
